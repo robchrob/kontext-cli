@@ -1,0 +1,14 @@
+# ctx config example
+# Copy to .ctxrc and customize
+
+# Language type (default, py, js, go, rs, c, java)
+type=py
+
+# Add include patterns (globs → include, names → exclude)
++Makefile,*.sql
+
+# Remove patterns
+-*.md
+
+# Token budget (0 = unlimited)
+max-tokens=100000
