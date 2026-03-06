@@ -8,6 +8,8 @@ declare -A EXCLUDE_DIRS=(
   [py]='__pycache__ .venv venv .env .mypy_cache .pytest_cache .ruff_cache .tox *.egg-info htmlcov dist build .idea .vscode'
   [go]='vendor .idea .vscode dist build'
   [rs]='target .idea .vscode dist build'
+  [c]='.git .cache build out compile_commands.json .idea .vscode'
+  [java]='.gradle build target .idea .vscode out'
 )
 declare -A INCLUDE_PATTERNS=(
   [default]='*'
@@ -15,6 +17,8 @@ declare -A INCLUDE_PATTERNS=(
   [py]='*.py *.pyw *.pyi *.toml *.cfg *.ini *.json *.yml *.yaml *.md *.txt *.rst *.j2 Makefile Dockerfile'
   [go]='*.go *.mod *.sum *.json *.yml *.yaml *.md *.toml Makefile Dockerfile'
   [rs]='*.rs *.toml *.json *.yml *.yaml *.md Makefile Dockerfile'
+  [c]='*.c *.h *.cpp *.hpp *.cc *.cxx *.hh *.inl Makefile CMakeLists.txt *.cmake *.json *.yml *.yaml *.md'
+  [java]='*.java *.xml *.gradle *.properties *.yml *.yaml *.md'
 )
 
 # Files excluded by name/glob regardless of type (binary, media, locks, artifacts)
@@ -22,10 +26,20 @@ GLOBAL_EXCLUDE_FILES='*.min.js *.min.css *.map *.lock package-lock.json yarn.loc
 
 declare -A EXT_CNT=() EXT_TOK=()
 
+# Token budget (0 = unlimited)
+MAX_TOKENS=0
+
 tok_est() {
   local b w
   b=$(wc -c <"$1")
   w=$(wc -w <"$1")
+  echo $(( b*100/680 + w*65/100 ))
+}
+
+tok_est_str() {
+  local b w
+  b=${1:-0}
+  w=${2:-0}
   echo $(( b*100/680 + w*65/100 ))
 }
 
@@ -58,7 +72,7 @@ apply_mods() {
       token="${part#"${part%%[![:space:]]*}"}"
       token="${token%"${token##*[![:space:]]}"}"
       [[ -z $token ]] && continue
-      if [[ $token == *[\*\?\[]* || $token == Makefile || $token == Dockerfile ]]; then
+      if [[ $token == *[\*\?\[]* || $token == Makefile || $token == Dockerfile || $token == CMakeLists.txt ]]; then
         target=include
       else
         target=exclude
@@ -78,6 +92,23 @@ apply_mods() {
       fi
     done
   done
+}
+
+load_ctxrc() {
+  local dir=$1
+  local ctxrc="$dir/.ctxrc"
+  [[ -f $ctxrc ]] || return 0
+  
+  while IFS='=' read -r key val; do
+    [[ -z $key || $key == \#* ]] && continue
+    val=${val#"${val%%[![:space:]]*}"}; val=${val%"${val##*[![:space:]]}"}
+    case "$key" in
+      type) type_from_rc=$val ;;
+      max-tokens) MAX_TOKENS=$val ;;
+      +*) apply_mods "${type_from_rc:-default}" "$key=$val" ;;
+      -*) apply_mods "${type_from_rc:-default}" "$key=$val" ;;
+    esac
+  done < "$ctxrc"
 }
 
 show_stats() {
@@ -111,7 +142,6 @@ show_stats() {
 is_globally_excluded() {
   local base="$1" pat
   for pat in $GLOBAL_EXCLUDE_FILES; do
-    # shellcheck disable=SC2254
     case "$base" in $pat) return 0 ;; esac
   done
   return 1
@@ -122,11 +152,12 @@ usage() {
 Usage: ctx [options] [modifiers...] [directory][.type]
 
 Options:
-  -o, --output <file>  write to file
-  -t, --tree           prepend directory tree (default: on)
-  -T, --no-tree        disable tree
-  --no-clip            skip clipboard
-  -h, --help           help
+  -o, --output <file>   write to file
+  -t, --tree            prepend directory tree (default: on)
+  -T, --no-tree         disable tree
+  -m, --max-tokens N    stop when token budget reached
+  --no-clip             skip clipboard
+  -h, --help            help
 
 Modifiers:
   +PAT[,PAT...]  add patterns (globs → include, names → exclude)
@@ -144,7 +175,36 @@ Examples:
   ctx .py                    # current dir as Python project
   ctx src/.js                # src/ as JavaScript project
   ctx +'Makefile' -'*.md' .  # add Makefile, drop markdown
+  ctx -m 50000 .py           # limit output to ~50k tokens
+
+Config (.ctxrc):
+  type=py
+  +Makefile,*.sql
+  -*.md
+  max-tokens=100000
 EOF
+}
+
+copy_to_clipboard() {
+  local content="$1"
+  
+  if command -v pbcopy >/dev/null 2>&1; then
+    printf '%s' "$content" | pbcopy && return 0
+  elif command -v wl-copy >/dev/null 2>&1; then
+    printf '%s' "$content" | wl-copy && return 0
+  elif command -v xclip >/dev/null 2>&1; then
+    printf '%s' "$content" | xclip -selection clipboard && return 0
+  elif command -v xsel >/dev/null 2>&1; then
+    printf '%s' "$content" | xsel --clipboard --input && return 0
+  elif command -v clip >/dev/null 2>&1; then
+    printf '%s' "$content" | clip && return 0
+  fi
+  return 1
+}
+
+get_git_ignored() {
+  local dir=$1
+  git -C "$dir" ls-files -oi --exclude-standard --directory 2>/dev/null | sed 's~/$~~' || true
 }
 
 run_tree() {
@@ -173,10 +233,10 @@ run_tree() {
 
   if git -C "$dir" rev-parse --is-inside-work-tree &>/dev/null; then
     local git_ignored
-    git_ignored=$(git -C "$dir" ls-files -oi --exclude-standard --directory 2>/dev/null || true)
+    git_ignored=$(get_git_ignored "$dir")
     if [[ -n "$git_ignored" ]]; then
       local git_pat
-      git_pat=$(echo "$git_ignored" | sed 's~/$~~' | tr '\n' '|')
+      git_pat=$(echo "$git_ignored" | tr '\n' '|')
       if [[ -n "$ignore_pat" ]]; then
         ignore_pat+="|$git_pat"
       else
@@ -185,7 +245,7 @@ run_tree() {
     fi
   fi
 
-  ignore_pat=${ignore_pat%|}
+  ignore_pat=${ignore_pat%│}
   if [[ -n "$ignore_pat" ]]; then
     tree_opts+=(-I "$ignore_pat")
   fi
@@ -197,6 +257,11 @@ run_tree() {
 run_find() {
   local dir=$1 type=$2
   local -a args=("find" "$dir")
+  local git_ignored=""
+  
+  if git -C "$dir" rev-parse --is-inside-work-tree &>/dev/null; then
+    git_ignored=$(get_git_ignored "$dir")
+  fi
 
   set -f
   [[ -n "${EXCLUDE_DIRS[$type]-}" ]] && {
@@ -225,14 +290,39 @@ run_find() {
 
   args+=(-print0)
 
+  local total_bytes=0 total_words=0
+
   while IFS= read -r -d '' file; do
     [[ ! -s "$file" ]] && continue
 
     local base ext
     base=${file##*/}
 
-    # Skip globally excluded files (binaries, locks, media, etc.)
     is_globally_excluded "$base" && continue
+    
+    if [[ -n "$git_ignored" ]]; then
+      local rel="${file#$dir/}"
+      if echo "$git_ignored" | grep -qxF "$rel"; then
+        continue
+      fi
+    fi
+
+    local fsize fwords
+    fsize=$(wc -c <"$file")
+    fwords=$(wc -w <"$file")
+    total_bytes=$((total_bytes + fsize))
+    total_words=$((total_words + fwords))
+
+    if [[ $MAX_TOKENS -gt 0 ]]; then
+      local est
+      est=$(tok_est_str "$fsize" "$fwords")
+      local running
+      running=$(tok_est_str "$total_bytes" "$total_words")
+      if (( running > MAX_TOKENS )); then
+        printf '\n--- TOKEN BUDGET REACHED (%s tokens) ---\n' "$(fmt_num "$MAX_TOKENS")" >&2
+        break
+      fi
+    fi
 
     [[ $base == *.* ]] && ext=.${base##*.} || ext=$base
     EXT_CNT[$ext]=$(( ${EXT_CNT[$ext]:-0} + 1 ))
@@ -248,7 +338,8 @@ run_find() {
 }
 
 main() {
-  local out_file='' no_clip=false use_tree=true
+  local out_file='' no_clip=false use_tree=true type_from_rc=''
+  
   while [[ $# -gt 0 ]]; do
     case $1 in
       -h|--help) usage; exit 0 ;;
@@ -256,6 +347,7 @@ main() {
       --no-clip) no_clip=true; shift ;;
       -t|--tree) use_tree=true; shift ;;
       -T|--no-tree) use_tree=false; shift ;;
+      -m|--max-tokens) [[ $# -gt 1 ]] && MAX_TOKENS=$2 || { usage; exit 1; }; shift 2 ;;
       *) break ;;
     esac
   done
@@ -280,6 +372,8 @@ main() {
   [[ -d $dir ]] || { echo "Directory '$dir' not found" >&2; exit 1; }
   [[ ${INCLUDE_PATTERNS[$type]+_} ]] || { echo "Unknown type '.$type'" >&2; exit 1; }
 
+  load_ctxrc "$dir"
+  [[ -n $type_from_rc && -z "${MODS[*]}" ]] && type="$type_from_rc"
   (( ${#MODS[@]} )) && apply_mods "$type" "${MODS[@]}"
 
   local tmp; tmp=$(mktemp)
@@ -304,7 +398,11 @@ main() {
   local content; content=$(<"$tmp"); rm -f "$tmp"
   [[ -z $content ]] && { echo "No files found" >&2; exit 0; }
   local dests=()
-  if ! $no_clip && command -v xclip &>/dev/null; then printf '%s' "$content" | xclip -selection clipboard && dests+=(clipboard); fi
+  if ! $no_clip; then
+    if copy_to_clipboard "$content"; then
+      dests+=(clipboard)
+    fi
+  fi
   if [[ -n $out_file ]]; then printf '%s' "$content" >"$out_file"; dests+=("$out_file"); fi
   [[ ${#dests[@]} -eq 0 ]] && dests+=(stdout)
 
