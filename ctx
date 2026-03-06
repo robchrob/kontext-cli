@@ -1,18 +1,25 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# ── Filter Presets ──────────────────────────────────────────────────
 declare -A EXCLUDE_DIRS=(
-  [default]='.git .venv *.img *.qcow2 *.zst *.pdf *.png'
-  [js]='.git node_modules build dist package.json package-lock.json .next'
-  [py]='.git .venv* __pycache__ build dist .pytest_cache *.pyc external'
-  [osdev]='.git docs build limine'
+  [default]='.git .svn .hg .DS_Store node_modules dist build out .idea .vscode .vs coverage'
+  [js]='node_modules .next .nuxt .turbo bower_components dist build out .idea .vscode coverage .nyc_output'
+  [py]='__pycache__ .venv venv .env .mypy_cache .pytest_cache .ruff_cache .tox *.egg-info htmlcov dist build .idea .vscode'
+  [go]='vendor .idea .vscode dist build'
+  [rs]='target .idea .vscode dist build'
 )
 declare -A INCLUDE_PATTERNS=(
   [default]='*'
-  [js]='*.js *.ts *.csv *.jsx *.tsx *.json *.cjs *.mjs *.html *.css'
-  [py]='*.py *.pyw *.cfg *.ini *.toml *.json *.yml *.yaml *.md *.j2 *.txt *.rst'
-  [osdev]='*.c *.h *.asm *.ld Makefile *.cfg'
+  [js]='*.js *.ts *.jsx *.tsx *.mjs *.cjs *.json *.html *.css *.scss *.svelte *.vue *.md'
+  [py]='*.py *.pyw *.pyi *.toml *.cfg *.ini *.json *.yml *.yaml *.md *.txt *.rst *.j2 Makefile Dockerfile'
+  [go]='*.go *.mod *.sum *.json *.yml *.yaml *.md *.toml Makefile Dockerfile'
+  [rs]='*.rs *.toml *.json *.yml *.yaml *.md Makefile Dockerfile'
 )
+
+# Files excluded by name/glob regardless of type (binary, media, locks, artifacts)
+GLOBAL_EXCLUDE_FILES='*.min.js *.min.css *.map *.lock package-lock.json yarn.lock pnpm-lock.yaml *.png *.jpg *.jpeg *.gif *.ico *.svg *.webp *.woff *.woff2 *.ttf *.eot *.otf *.pyc *.pyo *.so *.dylib *.dll *.o *.a *.class *.jar *.zip *.tar.gz *.tgz *.rar *.7z *.db *.sqlite *.sqlite3 *.log *.pid'
+
 declare -A EXT_CNT=() EXT_TOK=()
 
 tok_est() {
@@ -51,7 +58,7 @@ apply_mods() {
       token="${part#"${part%%[![:space:]]*}"}"
       token="${token%"${token##*[![:space:]]}"}"
       [[ -z $token ]] && continue
-      if [[ $token == *[\*\?\[]* || $token == Makefile ]]; then
+      if [[ $token == *[\*\?\[]* || $token == Makefile || $token == Dockerfile ]]; then
         target=include
       else
         target=exclude
@@ -75,48 +82,74 @@ apply_mods() {
 
 show_stats() {
   if (( ${#EXT_TOK[@]} == 0 )); then return; fi
-  local header max ext cnt tok f
+  local header max ext cnt tok f w
   header="Tokens"
+
   max=${#header}
+  for ext in "${!EXT_TOK[@]}"; do
+    (( ${#ext} > max )) && max=${#ext}
+  done
   for tok in "${EXT_TOK[@]}"; do
     f=$(fmt_num "$tok")
     (( ${#f} > max )) && max=${#f}
   done
-  printf 'Extension | Files | %*s\n' "$max" "$header" >&2
-  local sep="----------|-------|-" i
-  for ((i=0;i<max;i++)); do sep+='-'; done
-  printf '%s\n' "$sep" >&2
+  (( max < 9 )) && max=9
+
+  printf '%-*s | Files | %s\n' "$max" "Extension" "$header" >&2
+  local sep=""
+  for ((i=0; i<max; i++)); do sep+="-"; done
+  printf '%s-|-------|-\n' "$sep" >&2
+
   for ext in "${!EXT_TOK[@]}"; do
     printf '%s\t%d\t%d\n' "$ext" "${EXT_CNT["$ext"]}" "${EXT_TOK["$ext"]}"
   done | sort -t$'\t' -k3,3nr |
   while IFS=$'\t' read -r ext cnt raw; do
-    printf '%-9s | %5d | %*s\n' "$ext" "$cnt" "$max" "$(fmt_num "$raw")" >&2
+    printf '%-*s | %5d | %*s\n' "$max" "$ext" "$cnt" "${#header}" "$(fmt_num "$raw")" >&2
   done
+}
+
+is_globally_excluded() {
+  local base="$1" pat
+  for pat in $GLOBAL_EXCLUDE_FILES; do
+    # shellcheck disable=SC2254
+    case "$base" in $pat) return 0 ;; esac
+  done
+  return 1
 }
 
 usage() {
   cat >&2 <<'EOF'
-Usage: ctx [options] [modifiers...] <directory>[.type]
-Options:  -o, --output <file>  write to file
-          -t, --tree          prepend directory tree structure
-          --no-clip           skip clipboard
-          -h, --help          help
+Usage: ctx [options] [modifiers...] [directory][.type]
+
+Options:
+  -o, --output <file>  write to file
+  -t, --tree           prepend directory tree (default: on)
+  -T, --no-tree        disable tree
+  --no-clip            skip clipboard
+  -h, --help           help
 
 Modifiers:
-  +PAT[,PAT...]  add pattern(s). PAT with glob chars => include_patterns, else => exclude_dirs
-  -PAT[,PAT...]  remove pattern(s).
+  +PAT[,PAT...]  add patterns (globs → include, names → exclude)
+  -PAT[,PAT...]  remove patterns
+
+Types:
+EOF
+  for k in $(printf '%s\n' "${!INCLUDE_PATTERNS[@]}" | sort); do
+    printf '  .%-10s include: %s\n' "$k" "${INCLUDE_PATTERNS[$k]}" >&2
+  done
+  cat >&2 <<'EOF'
 
 Examples:
-  ctx +'.c' -'.git, *.img' .py
-  ctx --tree +'*.c' .osdev
+  ctx                        # current dir, default type, tree on
+  ctx .py                    # current dir as Python project
+  ctx src/.js                # src/ as JavaScript project
+  ctx +'Makefile' -'*.md' .  # add Makefile, drop markdown
 EOF
-  for k in "${!INCLUDE_PATTERNS[@]}"; do printf "  .%s\n" "$k" >&2; done
 }
 
 run_tree() {
   local dir=$1 type=$2
 
-  # Prefer tree-git-ignore if available
   if command -v tree-git-ignore >/dev/null 2>&1; then
     printf '### Directory Tree\n'
     tree-git-ignore -a --noreport --prune "$dir" || true
@@ -125,7 +158,7 @@ run_tree() {
   fi
 
   if ! command -v tree >/dev/null 2>&1; then
-    printf '### (Warning: "tree" command not found, skipping tree view)\n\n'
+    printf '### (Warning: "tree" not found, skipping tree view)\n\n'
     return
   fi
 
@@ -141,7 +174,6 @@ run_tree() {
   if git -C "$dir" rev-parse --is-inside-work-tree &>/dev/null; then
     local git_ignored
     git_ignored=$(git -C "$dir" ls-files -oi --exclude-standard --directory 2>/dev/null || true)
-
     if [[ -n "$git_ignored" ]]; then
       local git_pat
       git_pat=$(echo "$git_ignored" | sed 's~/$~~' | tr '\n' '|')
@@ -198,7 +230,11 @@ run_find() {
 
     local base ext
     base=${file##*/}
-    [[ $file == *.* ]] && ext=.${file##*.} || ext=$base
+
+    # Skip globally excluded files (binaries, locks, media, etc.)
+    is_globally_excluded "$base" && continue
+
+    [[ $base == *.* ]] && ext=.${base##*.} || ext=$base
     EXT_CNT[$ext]=$(( ${EXT_CNT[$ext]:-0} + 1 ))
     EXT_TOK[$ext]=$(( ${EXT_TOK[$ext]:-0} + $(tok_est "$file") ))
     local -a lines
@@ -212,25 +248,32 @@ run_find() {
 }
 
 main() {
-  local out_file='' no_clip=false use_tree=false
+  local out_file='' no_clip=false use_tree=true
   while [[ $# -gt 0 ]]; do
     case $1 in
       -h|--help) usage; exit 0 ;;
       -o|--output) [[ $# -gt 1 ]] && out_file=$2 || { usage; exit 1; }; shift 2 ;;
       --no-clip) no_clip=true; shift ;;
       -t|--tree) use_tree=true; shift ;;
+      -T|--no-tree) use_tree=false; shift ;;
       *) break ;;
     esac
   done
 
   local -a MODS=()
-  while [[ $# -gt 1 && ( $1 == +* || $1 == -* ) ]]; do
+  while [[ $# -gt 0 && ( $1 == +* || $1 == -* ) ]]; do
     MODS+=("$1")
     shift
   done
 
-  [[ $# -eq 0 ]] && { usage; exit 1; }
-  local input="$1" dir type
+  local input="${1:-.}"
+  [[ $# -gt 1 ]] && shift
+  while [[ $# -gt 0 && ( $1 == +* || $1 == -* ) ]]; do
+    MODS+=("$1")
+    shift
+  done
+
+  local dir type
   dir=${input%.*}; type=${input##*.}
   [[ -z $dir ]] && dir='.'
   [[ -z $type || $type == "$dir" ]] && type=default
@@ -275,9 +318,8 @@ main() {
   fi
 
   total=$(fmt_num "$raw_total")
-  echo "Context for '$dir' (type: $type) copied to ${dests[*]} (~$total tokens)" >&2
+  echo "Context for '$dir' (type: $type) → ${dests[*]} (~$total tokens)" >&2
   [[ ${dests[*]} == *stdout* ]] && printf '%s' "$content"
 }
 
 main "$@"
-
