@@ -1,9 +1,22 @@
 # Changelog
-
 All notable changes to ctx will be documented in this file.
 
-## [0.5.0]
+## [0.5.1]
+### Changed
+- **Removed `--no-clip`**: Clipboard is now automatic when available. Behavior:
+  - `ctx` → stdout + clipboard (if available)
+  - `ctx -o` → clipboard only (falls back to stdout if no clipboard)
+  - `ctx -o file.txt` → file + clipboard
+- **Made `-o/--output` file optional**: `-o` can now be used without a filename argument
+- **Simplified tree options**: Removed `-t/--tree` since tree is now default. Only `-T/--no-tree` remains to disable it
+- **Enhanced `-I/--show-ignored` summary**: Now prints a summary table at the top showing:
+  - Ignored directories count
+  - Global exclusions count
+  - Pattern mismatches count
+  - Total ignored count
+- **Updated usage documentation** to reflect new option signatures
 
+## [0.5.0]
 ### Added
 - **`-I` / `--show-ignored` reports all four filtering layers**: Previously only showed global excludes and gitignore. Now reports:
   - **Dir prune** (`SKIP [dir]:`): Pre-scans and reports excluded directories like `.git`, `.venv`, etc.
