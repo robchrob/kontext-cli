@@ -69,6 +69,11 @@ IGNORED_BY=''
 SKIP_COUNT=0
 DIR_SKIP_COUNT=0
 INCLUDE_SKIP_COUNT=0
+SILENT_MODE=false
+
+# Arrays to store ignored items for summary table
+declare -a IGNORED_FILES=()
+declare -a IGNORED_DIRS=()
 
 tok_est() {
   local b w
@@ -185,6 +190,27 @@ show_stats() {
   done
 }
 
+show_ignored_summary() {
+  local total_ignored=$((SKIP_COUNT + DIR_SKIP_COUNT + INCLUDE_SKIP_COUNT))
+  (( total_ignored == 0 )) && return
+
+  printf '\n### Ignored Summary\n' >&2
+  printf '%-20s | %s\n' "Type" "Count" >&2
+  printf '%-20s-|-%s\n' "--------------------" "-----" >&2
+
+  if (( DIR_SKIP_COUNT > 0 )); then
+    printf '%-20s | %d\n' "Directories" "$DIR_SKIP_COUNT" >&2
+  fi
+  if (( SKIP_COUNT > 0 )); then
+    printf '%-20s | %d\n' "Global exclusions" "$SKIP_COUNT" >&2
+  fi
+  if (( INCLUDE_SKIP_COUNT > 0 )); then
+    printf '%-20s | %d\n' "Pattern mismatches" "$INCLUDE_SKIP_COUNT" >&2
+  fi
+  printf '%-20s | %d\n' "Total" "$total_ignored" >&2
+  printf '\n' >&2
+}
+
 GLOB_EXCLUDE_PATTERN=""
 for pat in "${GLOBAL_EXCLUDE_FILES[@]}"; do
   GLOB_EXCLUDE_PATTERN+="${GLOB_EXCLUDE_PATTERN:+|}$pat"
@@ -208,13 +234,11 @@ usage() {
 Usage: ctx [options] [modifiers...] [dir] [.type]
 
 Options:
-  -o, --output <file>   write to file
-  -t, --tree            prepend directory tree (default: on)
-  -T, --no-tree         disable tree
+  -o, --output [file]   write to file (default: stdout)
+  -T, --no-tree         disable directory tree (default: on)
   -m, --max-tokens N    stop at token budget
   -r, --random          randomize file order (pair with -m for sampling)
   -I, --show-ignored    print skipped files to stderr
-  --no-clip             skip clipboard
   -h, --help            help
 
 Modifiers:
@@ -430,16 +454,20 @@ run_find() {
 }
 
 main() {
-  local out_file='' no_clip=false use_tree=true
+  local out_file='' out_file_explicit=false use_tree=true
   local type_from_rc='' type_explicit=false
   local -a MODS=() MODS_FROM_RC=()
 
   while [[ $# -gt 0 ]]; do
     case $1 in
       -h|--help) usage; exit 0 ;;
-      -o|--output) [[ $# -gt 1 ]] && out_file=$2 || { usage; exit 1; }; shift 2 ;;
-      --no-clip) no_clip=true; shift ;;
-      -t|--tree) use_tree=true; shift ;;
+      -o|--output)
+        if [[ $# -gt 1 && ! $2 =~ ^- && ! $2 =~ ^\+ && ! $2 =~ ^\. ]]; then
+          out_file=$2; out_file_explicit=true; shift 2
+        else
+          out_file_explicit=true; SILENT_MODE=true; shift
+        fi
+        ;;
       -T|--no-tree) use_tree=false; shift ;;
       -m|--max-tokens) [[ $# -gt 1 ]] && MAX_TOKENS=$2 || { usage; exit 1; }; shift 2 ;;
       -r|--random) RANDOM_ORDER=true; shift ;;
@@ -506,27 +534,53 @@ main() {
   local content; content=$(<"$tmp"); rm -f "$tmp"
   [[ -z $content ]] && { echo "No files found" >&2; exit 0; }
 
+  # Determine output destinations
   local dests=()
-  if ! $no_clip && copy_to_clipboard "$content"; then dests+=(clipboard); fi
-  [[ -n $out_file ]] && { printf '%s' "$content" >"$out_file"; dests+=("$out_file"); }
-  [[ ${#dests[@]} -eq 0 ]] && dests+=(stdout)
+  local use_stdout=false use_clipboard=false
 
-  show_stats
-
-  local raw_total total
-  raw_total=$(( $(printf '%s' "$content" | wc -c)*100/680 + $(printf '%s' "$content" | wc -w)*65/100 ))
-  (( raw_total > 1000000 )) && printf 'WARNING: Content exceeds 1M tokens (~%s)\n' "$(fmt_num "$raw_total")" >&2
-
-  total=$(fmt_num "$raw_total")
-  if $SHOW_IGNORED; then
-    local skipped=$((SKIP_COUNT + DIR_SKIP_COUNT + INCLUDE_SKIP_COUNT))
-    echo "Context for '$dir' (type: $type) → ${dests[*]} (~$total tokens, $skipped skipped)" >&2
-  elif (( SKIP_COUNT > 0 )); then
-    echo "Context for '$dir' (type: $type) → ${dests[*]} (~$total tokens, $SKIP_COUNT files skipped)" >&2
+  if ! $out_file_explicit; then
+    # No -o specified: output to stdout, try clipboard
+    use_stdout=true
+    if copy_to_clipboard "$content" 2>/dev/null; then
+      use_clipboard=true
+    fi
+  elif [[ -z $out_file ]]; then
+    # -o specified without file: clipboard only (silent), fall back to stdout if no clipboard
+    if copy_to_clipboard "$content" 2>/dev/null; then
+      use_clipboard=true
+    else
+      use_stdout=true
+    fi
   else
+    # -o specified with file: write to file, try clipboard
+    printf '%s' "$content" >"$out_file"
+    dests+=("$out_file")
+    if copy_to_clipboard "$content" 2>/dev/null; then
+      use_clipboard=true
+    fi
+  fi
+
+  $use_stdout && dests+=("stdout")
+  $use_clipboard && dests+=("clipboard")
+
+  # Show ignored summary at top if requested (and not silent)
+  if $SHOW_IGNORED && ! $SILENT_MODE; then
+    show_ignored_summary
+  fi
+
+  # Show stats and summary unless in silent mode
+  if ! $SILENT_MODE; then
+    show_stats
+
+    local raw_total total
+    raw_total=$(( $(printf '%s' "$content" | wc -c)*100/680 + $(printf '%s' "$content" | wc -w)*65/100 ))
+    (( raw_total > 1000000 )) && printf 'WARNING: Content exceeds 1M tokens (~%s)\n' "$(fmt_num "$raw_total")" >&2
+
+    total=$(fmt_num "$raw_total")
     echo "Context for '$dir' (type: $type) → ${dests[*]} (~$total tokens)" >&2
   fi
-  [[ ${dests[*]} == *stdout* ]] && printf '%s' "$content"
+
+  $use_stdout && printf '%s' "$content"
 }
 
 main "$@"
