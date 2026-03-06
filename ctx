@@ -1,0 +1,283 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+declare -A EXCLUDE_DIRS=(
+  [default]='.git .venv *.img *.qcow2 *.zst *.pdf *.png'
+  [js]='.git node_modules build dist package.json package-lock.json .next'
+  [py]='.git .venv* __pycache__ build dist .pytest_cache *.pyc external'
+  [osdev]='.git docs build limine'
+)
+declare -A INCLUDE_PATTERNS=(
+  [default]='*'
+  [js]='*.js *.ts *.csv *.jsx *.tsx *.json *.cjs *.mjs *.html *.css'
+  [py]='*.py *.pyw *.cfg *.ini *.toml *.json *.yml *.yaml *.md *.j2 *.txt *.rst'
+  [osdev]='*.c *.h *.asm *.ld Makefile *.cfg'
+)
+declare -A EXT_CNT=() EXT_TOK=()
+
+tok_est() {
+  local b w
+  b=$(wc -c <"$1")
+  w=$(wc -w <"$1")
+  echo $(( b*100/680 + w*65/100 ))
+}
+
+fmt_num() {
+  case "$1" in
+    ''|*[!0-9]*) printf '%s' "$1";;
+    *) if command -v numfmt >/dev/null 2>&1; then LC_NUMERIC=C numfmt --grouping "$1" 2>/dev/null || printf '%s' "$1"; else printf '%s' "$1"; fi;;
+  esac
+}
+
+_add_word() {
+  local cur="$1" token="$2" w
+  for w in $cur; do [[ "$w" == "$token" ]] && { printf '%s' "$cur"; return; }; done
+  printf '%s %s' "$cur" "$token"
+}
+
+_remove_word() {
+  local cur="$1" token="$2" out= w
+  for w in $cur; do [[ "$w" == "$token" ]] || out="$out $w"; done
+  echo "${out#"${out%%[! ]*}"}"
+}
+
+apply_mods() {
+  local type="$1"; shift
+  local m body part token target
+  for m in "$@"; do
+    body=${m:1}
+    IFS=',' read -r -a parts <<<"$body"
+    for part in "${parts[@]}"; do
+      token="${part#"${part%%[![:space:]]*}"}"
+      token="${token%"${token##*[![:space:]]}"}"
+      [[ -z $token ]] && continue
+      if [[ $token == *[\*\?\[]* || $token == Makefile ]]; then
+        target=include
+      else
+        target=exclude
+      fi
+      if [[ ${m:0:1} == '+' ]]; then
+        if [[ $target == include ]]; then
+          INCLUDE_PATTERNS["$type"]=$(_add_word "${INCLUDE_PATTERNS[$type]-}" "$token")
+        else
+          EXCLUDE_DIRS["$type"]=$(_add_word "${EXCLUDE_DIRS[$type]-}" "$token")
+        fi
+      else
+        if [[ $target == include ]]; then
+          INCLUDE_PATTERNS["$type"]=$(_remove_word "${INCLUDE_PATTERNS[$type]-}" "$token")
+        else
+          EXCLUDE_DIRS["$type"]=$(_remove_word "${EXCLUDE_DIRS[$type]-}" "$token")
+        fi
+      fi
+    done
+  done
+}
+
+show_stats() {
+  if (( ${#EXT_TOK[@]} == 0 )); then return; fi
+  local header max ext cnt tok f
+  header="Tokens"
+  max=${#header}
+  for tok in "${EXT_TOK[@]}"; do
+    f=$(fmt_num "$tok")
+    (( ${#f} > max )) && max=${#f}
+  done
+  printf 'Extension | Files | %*s\n' "$max" "$header" >&2
+  local sep="----------|-------|-" i
+  for ((i=0;i<max;i++)); do sep+='-'; done
+  printf '%s\n' "$sep" >&2
+  for ext in "${!EXT_TOK[@]}"; do
+    printf '%s\t%d\t%d\n' "$ext" "${EXT_CNT["$ext"]}" "${EXT_TOK["$ext"]}"
+  done | sort -t$'\t' -k3,3nr |
+  while IFS=$'\t' read -r ext cnt raw; do
+    printf '%-9s | %5d | %*s\n' "$ext" "$cnt" "$max" "$(fmt_num "$raw")" >&2
+  done
+}
+
+usage() {
+  cat >&2 <<'EOF'
+Usage: ctx [options] [modifiers...] <directory>[.type]
+Options:  -o, --output <file>  write to file
+          -t, --tree          prepend directory tree structure
+          --no-clip           skip clipboard
+          -h, --help          help
+
+Modifiers:
+  +PAT[,PAT...]  add pattern(s). PAT with glob chars => include_patterns, else => exclude_dirs
+  -PAT[,PAT...]  remove pattern(s).
+
+Examples:
+  ctx +'.c' -'.git, *.img' .py
+  ctx --tree +'*.c' .osdev
+EOF
+  for k in "${!INCLUDE_PATTERNS[@]}"; do printf "  .%s\n" "$k" >&2; done
+}
+
+run_tree() {
+  local dir=$1 type=$2
+
+  # Prefer tree-git-ignore if available
+  if command -v tree-git-ignore >/dev/null 2>&1; then
+    printf '### Directory Tree\n'
+    tree-git-ignore -a --noreport --prune "$dir" || true
+    printf '\n'
+    return
+  fi
+
+  if ! command -v tree >/dev/null 2>&1; then
+    printf '### (Warning: "tree" command not found, skipping tree view)\n\n'
+    return
+  fi
+
+  printf '### Directory Tree\n'
+
+  local tree_opts=(-a --noreport --prune)
+  local ignore_pat=""
+
+  if [[ -n "${EXCLUDE_DIRS[$type]-}" ]]; then
+    ignore_pat="${EXCLUDE_DIRS[$type]// /|}"
+  fi
+
+  if git -C "$dir" rev-parse --is-inside-work-tree &>/dev/null; then
+    local git_ignored
+    git_ignored=$(git -C "$dir" ls-files -oi --exclude-standard --directory 2>/dev/null || true)
+
+    if [[ -n "$git_ignored" ]]; then
+      local git_pat
+      git_pat=$(echo "$git_ignored" | sed 's~/$~~' | tr '\n' '|')
+      if [[ -n "$ignore_pat" ]]; then
+        ignore_pat+="|$git_pat"
+      else
+        ignore_pat="$git_pat"
+      fi
+    fi
+  fi
+
+  ignore_pat=${ignore_pat%|}
+  if [[ -n "$ignore_pat" ]]; then
+    tree_opts+=(-I "$ignore_pat")
+  fi
+
+  tree "${tree_opts[@]}" "$dir" || true
+  printf '\n'
+}
+
+run_find() {
+  local dir=$1 type=$2
+  local -a args=("find" "$dir")
+
+  set -f
+  [[ -n "${EXCLUDE_DIRS[$type]-}" ]] && {
+    args+=(\()
+    local first=1 d
+    for d in ${EXCLUDE_DIRS[$type]}; do
+      (( first )) || args+=(-o)
+      first=0
+      args+=(-name "$d")
+    done
+    args+=(\) -prune -o)
+  }
+
+  args+=(-type f)
+  if [[ "${INCLUDE_PATTERNS[$type]}" != "*" ]]; then
+    args+=(\()
+    local first=1 pat
+    for pat in ${INCLUDE_PATTERNS[$type]}; do
+      (( first )) || args+=(-o)
+      first=0
+      args+=(-name "$pat")
+    done
+    args+=(\))
+  fi
+  set +f
+
+  args+=(-print0)
+
+  while IFS= read -r -d '' file; do
+    [[ ! -s "$file" ]] && continue
+
+    local base ext
+    base=${file##*/}
+    [[ $file == *.* ]] && ext=.${file##*.} || ext=$base
+    EXT_CNT[$ext]=$(( ${EXT_CNT[$ext]:-0} + 1 ))
+    EXT_TOK[$ext]=$(( ${EXT_TOK[$ext]:-0} + $(tok_est "$file") ))
+    local -a lines
+    mapfile -n2 -t lines <"$file" 2>/dev/null || true
+
+    if [[ ${lines[0]:-} != *"$file"* && ${lines[1]:-} != *"$file"* && ${lines[0]:-} != *"$base"* && ${lines[1]:-} != *"$base"* ]]; then
+      printf '### %s\n' "$file"
+    fi
+    tr -d '\0' <"$file"; printf '\n\n'
+  done < <("${args[@]}" 2>/dev/null)
+}
+
+main() {
+  local out_file='' no_clip=false use_tree=false
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      -h|--help) usage; exit 0 ;;
+      -o|--output) [[ $# -gt 1 ]] && out_file=$2 || { usage; exit 1; }; shift 2 ;;
+      --no-clip) no_clip=true; shift ;;
+      -t|--tree) use_tree=true; shift ;;
+      *) break ;;
+    esac
+  done
+
+  local -a MODS=()
+  while [[ $# -gt 1 && ( $1 == +* || $1 == -* ) ]]; do
+    MODS+=("$1")
+    shift
+  done
+
+  [[ $# -eq 0 ]] && { usage; exit 1; }
+  local input="$1" dir type
+  dir=${input%.*}; type=${input##*.}
+  [[ -z $dir ]] && dir='.'
+  [[ -z $type || $type == "$dir" ]] && type=default
+  [[ -d $dir ]] || { echo "Directory '$dir' not found" >&2; exit 1; }
+  [[ ${INCLUDE_PATTERNS[$type]+_} ]] || { echo "Unknown type '.$type'" >&2; exit 1; }
+
+  (( ${#MODS[@]} )) && apply_mods "$type" "${MODS[@]}"
+
+  local tmp; tmp=$(mktemp)
+  local full_path
+  full_path=$(cd "$dir" && pwd)
+
+  printf 'Please state the full filename with its extension in the line immediately preceding each code block!\n\n' >> "$tmp"
+  printf '## Context for %s\n' "$full_path" >> "$tmp"
+
+  if $use_tree; then
+    run_tree "$dir" "$type" >> "$tmp"
+  fi
+
+  if [[ -f "$dir/AGENTS.md" ]]; then
+    printf '### System Prompt (from AGENTS.md)\n' >> "$tmp"
+    cat "$dir/AGENTS.md" >> "$tmp"
+    printf '\n\n' >> "$tmp"
+  fi
+
+  run_find "$dir" "$type" >>"$tmp"
+
+  local content; content=$(<"$tmp"); rm -f "$tmp"
+  [[ -z $content ]] && { echo "No files found" >&2; exit 0; }
+  local dests=()
+  if ! $no_clip && command -v xclip &>/dev/null; then printf '%s' "$content" | xclip -selection clipboard && dests+=(clipboard); fi
+  if [[ -n $out_file ]]; then printf '%s' "$content" >"$out_file"; dests+=("$out_file"); fi
+  [[ ${#dests[@]} -eq 0 ]] && dests+=(stdout)
+
+  show_stats
+
+  local raw_total total
+  raw_total=$(( $(printf '%s' "$content" | wc -c)*100/680 + $(printf '%s' "$content" | wc -w)*65/100 ))
+
+  if (( raw_total > 1000000 )); then
+    printf 'WARNING: Content exceeds 1M tokens (~%s)\n' "$(fmt_num "$raw_total")" >&2
+  fi
+
+  total=$(fmt_num "$raw_total")
+  echo "Context for '$dir' (type: $type) copied to ${dests[*]} (~$total tokens)" >&2
+  [[ ${dests[*]} == *stdout* ]] && printf '%s' "$content"
+}
+
+main "$@"
+
