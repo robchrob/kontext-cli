@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="0.7.4"
+VERSION="0.7.5"
 
 # ── Always-excluded directories (never traversed) ─────────────────
 ALWAYS_EXCLUDE_DIRS='.git .svn .hg .idea .vscode .vs'
@@ -118,6 +118,11 @@ _is_known_include() {
   return 1
 }
 
+# Check if a token contains glob characters (*, ?, [)
+_is_glob() {
+  [[ $1 == *[\*\?\[]* ]]
+}
+
 # ── Extension detection ───────────────────────────────────────────
 # Dotfiles with sub-extension (.ktxrc.example) → full basename
 # Normal files → .ext; extensionless → basename
@@ -133,8 +138,10 @@ _file_ext() {
 }
 
 # ── Modifier application ──────────────────────────────────────────
-# +GLOB → add to includes; +NAME → add to exclude dirs; both → FORCE_INCLUDE
-# -GLOB → remove from includes; -NAME → remove from exclude dirs
+# +PATTERN → add to include patterns (also force-includes to override blocklist)
+# -PATTERN → remove from include patterns
+# +NAME   → add to include patterns + force-include (non-glob, non-known names)
+# -NAME   → remove from excluded dirs (re-include a directory)
 apply_mods() {
   local type="$1"; shift
   local m body part token is_glob is_known
@@ -147,17 +154,16 @@ apply_mods() {
       [[ -z $token ]] && continue
 
       is_glob=false; is_known=false
-      [[ $token == *[\*\?\[]* ]] && is_glob=true
+      _is_glob "$token" && is_glob=true
       _is_known_include "$token" && is_known=true
 
       if [[ ${m:0:1} == '+' ]]; then
+        # + always adds to include patterns and force-include
         FORCE_INCLUDE+=("$token")
         INCLUDE_PATTERNS["$type"]=$(_add_word "${INCLUDE_PATTERNS[$type]-}" "$token")
-        # Plain names (not globs, not known includes) also exclude as dirs
-        if ! $is_glob && ! $is_known; then
-          EXCLUDE_DIRS["$type"]=$(_add_word "${EXCLUDE_DIRS[$type]-}" "$token")
-        fi
       else
+        # - with glob or known include: remove from include patterns
+        # - with plain name: remove from excluded dirs (stop skipping that dir)
         if $is_glob || $is_known; then
           INCLUDE_PATTERNS["$type"]=$(_remove_word "${INCLUDE_PATTERNS[$type]-}" "$token")
         else
@@ -272,6 +278,39 @@ resolve_with() {
   for (( i=${#order[@]}-1; i>=0; i-- )); do
     printf '%s\n' "${order[$i]}"
   done
+}
+
+# ── Merge include/exclude across with= DAG for pattern types ──────
+_merge_pattern_type() {
+  local type=$1
+  local -a all_types
+  mapfile -t all_types < <(resolve_with "$type")
+
+  local merged_include="" merged_exclude="" t w
+  for t in "${all_types[@]}"; do
+    # Merge include patterns
+    local inc="${INCLUDE_PATTERNS[$t]-}"
+    if [[ -n "$inc" && "$inc" != "__filelist__" ]]; then
+      set -f
+      for w in $inc; do
+        merged_include=$(_add_word "$merged_include" "$w")
+      done
+      set +f
+    fi
+    # Merge exclude dirs
+    local exc="${EXCLUDE_DIRS[$t]-}"
+    if [[ -n "$exc" ]]; then
+      set -f
+      for w in $exc; do
+        merged_exclude=$(_add_word "$merged_exclude" "$w")
+      done
+      set +f
+    fi
+  done
+
+  # Write merged values back to the primary type
+  INCLUDE_PATTERNS["$type"]="$merged_include"
+  EXCLUDE_DIRS["$type"]="$merged_exclude"
 }
 
 # ── Statistics ─────────────────────────────────────────────────────
@@ -575,42 +614,40 @@ run_files() {
 # ── Usage ──────────────────────────────────────────────────────────
 usage() {
   cat >&2 <<'EOF'
-Usage: ktx [options] [modifiers...] [dir] [.type]
+kontext-cli (ktx) - CLI context grabber
+Usage:
+    ktx [options] [modifiers...] [dir] [.type]
 
 Options:
-  -o [FILE]     Write to file (no arg = stdout)
-  -l N          Token limit (default = unlimited)
-  -r            Randomize file order
-  -T            Skip directory tree
-  -t            Show skipped files on stderr (trace)
-  -c FILE       Config file (default: nearest .ktxrc upward)
-  --raw         No instruction header, no AGENTS.md
-  --no-clip     Skip clipboard
-  -v            Version
-  -h            Help
+  -o, --output [FILE]  Write to file (no arg = stdout)
+  -l, --limit N        Token limit (default = unlimited)
+  -r, --randomize      Randomize file order
+  -T, --no-tree        Skip directory tree
+  -t, --trace          Show skipped files on stderr
+  -c, --config FILE    Config file (default: nearest .ktxrc)
+  --raw                No instruction header, no AGENTS.md
+  --no-clip            Skip clipboard
+  -v, --version        Show version
+  -h, --help           Show help
 
-Modifiers (token shape determines target list):
-  +GLOB         Add to include patterns    (e.g. +'*.sql')
-  +NAME         Skip this directory        (e.g. +'vendor')
-  -GLOB         Remove from include list   (e.g. -'*.md')
-  -NAME         Stop skipping directory    (e.g. -'dist')
-  Comma-separated: +'*.sql,*.graphql'
-  Force-include overrides global blocklist: +'.env'
+Modifiers: +ITEM includes files, -ITEM excludes.
+  Globs (*, ?, []):  +'*.sql'   include SQL files
+                     -'*.md'    stop including markdown
+  Plain names:       -'dist'    stop skipping dist/ directory
+                     +'.env'    force-include (overrides blocklist)
 
-  GLOB = contains *, ?, or [.  Anything else = NAME.
-
-Types: .default, .js, .py (built-in). Define custom types in .ktxrc:
-  [type:name] with include=/exclude= patterns or file paths (one per line).
-  Use with= to compose file-list types. See .ktxrc.example.
+Types: .default, .js, .py (built-in). Define custom types in .ktxrc.
+Custom types support with= to compose other types.
+See .ktxrc.example for Go, Rust, C/C++, Java and file-list examples.
 
 Examples:
   ktx                        current dir, default type
   ktx .py                    Python project → clipboard
   ktx src/ .js               JS/TS in src/
-  ktx -l 50000 .py           ~50k token limit
-  ktx -r -l 50000 .py        random sample within limit
-  ktx +'*.sql' -'*.md' .py   add SQL, drop markdown
-  ktx -o ctx.txt .py         file output + clipboard
+  ktx .py -l 50000           ~50k token limit
+  ktx .py -r -l 50000        random sample within limit
+  ktx .py +'*.sql' -'*.md'   add SQL, drop markdown
+  ktx .py -o ctx.txt         file output + clipboard
   ktx -o                     stdout only (no clipboard)
 EOF
 }
@@ -619,14 +656,16 @@ EOF
 main() {
   local no_clip=false
 
-  # ── Parse options ------------------------------------------------
+  # ── Parse all arguments (options, modifiers, positionals mixed) --
+  local -a MODS=() POSITIONAL=()
+
   while [[ $# -gt 0 ]]; do
     case $1 in
       -h|--help)         usage; exit 0 ;;
       -v|--version)      echo "ktx $VERSION"; exit 0 ;;
       -o|--output)
         OUT_TO_FILE=true
-        if [[ $# -gt 1 && ! "$2" =~ ^- ]]; then
+        if [[ $# -gt 1 && ! "$2" =~ ^- && ! "$2" =~ ^\+ && ! "$2" =~ ^\. ]]; then
           OUT_FILE=$2
           shift 2
         else
@@ -641,17 +680,26 @@ main() {
       --raw)             RAW_MODE=true; shift ;;
       --no-clip)         no_clip=true; shift ;;
       --)                shift; break ;;
-      *)                 break ;;
+      +*) MODS+=("$1"); shift ;;
+      -*)
+        # Check if this is a modifier (e.g., -'*.md', -dist) vs unknown option
+        # Modifiers: after the prefix '-', the body is not an option letter/word
+        local _body="${1:1}"
+        if [[ $_body =~ ^[a-zA-Z] && ! $_body == *[\*\?\[\.]* && ${#_body} -le 2 ]]; then
+          # Looks like an unknown short option
+          echo "Unknown option: $1" >&2; usage; exit 1
+        else
+          MODS+=("$1")
+        fi
+        shift
+        ;;
+      *)  POSITIONAL+=("$1"); shift ;;
     esac
   done
 
-  # ── Collect modifiers & positional args --------------------------
-  local -a MODS=() POSITIONAL=()
+  # Collect remaining args after --
   while [[ $# -gt 0 ]]; do
-    case $1 in
-      +*|-*) MODS+=("$1") ;;
-      *)     POSITIONAL+=("$1") ;;
-    esac
+    POSITIONAL+=("$1")
     shift
   done
 
@@ -707,6 +755,11 @@ main() {
     is_filelist=true
   elif [[ -z "${INCLUDE_PATTERNS[$type]+_}" ]]; then
     echo "Unknown type '.$type'" >&2; exit 1
+  fi
+
+  # ── Merge with= dependencies for pattern types ───────────────────
+  if ! $is_filelist && [[ -n "${CUSTOM_TYPE_WITH[$type]-}" ]]; then
+    _merge_pattern_type "$type"
   fi
 
   # ── Build output --------------------------------------------------
