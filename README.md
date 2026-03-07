@@ -10,7 +10,7 @@ ktx -r -l 50000 .py                  # Random sample within budget
 ktx +'*.sql,Makefile' .py            # Include SQL files and Makefile
 ktx -o context.txt .py               # Save to file + clipboard
 ktx --raw .py                        # No AGENTS.md, no instruction header
-ktx .health                          # Domain slice (file list from .ctxrc)
+ktx .health                          # Domain slice (file list from .ktxrc)
 ```
 
 Requires `bash` 4+, `coreutils`. Clipboard: `pbcopy` / `wl-copy` / `xclip` / `xsel`.
@@ -39,7 +39,7 @@ ktx [options] [modifiers...] [dir] [.type]
 | `-l` | `--limit N` | Token budget (`0` = unlimited) |
 | `-r` | `--randomize` | Randomize file order |
 | `-I` | `--ignored` | Print skipped files to stderr |
-| `-c` | `--config FILE` | Config file (default: `.ctxrc` searched upward) |
+| `-c` | `--config FILE` | Config file (default: `.ktxrc` searched upward) |
 |      | `--raw` | Disable instruction header and AGENTS.md |
 | `-h` | `--help` | Help (includes version) |
 | `-v` | `--version` | Print version |
@@ -56,7 +56,7 @@ Built-in types scan files by glob patterns:
 
 All types also exclude `.git .svn .hg .idea .vscode .vs` and a [global blocklist](#default-exclusions) of binaries, secrets, media, and lock files.
 
-Custom types (pattern-based or file-list) are defined in `.ctxrc`.
+Custom types (pattern-based or file-list) are defined in `.ktxrc`.
 
 ### Modifiers
 
@@ -70,16 +70,16 @@ ktx -'dist' .js                      # stop excluding dist/
 ktx +'.env,LICENSE' .py              # force-include globally excluded files
 ```
 
-Precedence: **built-in type → `.ctxrc` → CLI modifiers**.
+Precedence: **built-in type → `.ktxrc` → CLI modifiers**.
 
 ## Configuration
 
-### .ctxrc
+### .ktxrc
 
-Place `.ctxrc` in your project root (or any parent). `ktx` walks upward from the target directory to find the nearest one. Override with `-c path`.
+Place `.ktxrc` in your project root (or any parent). `ktx` walks upward from the target directory to find the nearest one. Override with `-c path`.
 
 ```bash
-# .ctxrc
+# .ktxrc
 type=py
 limit=100000
 agent-header=Focus on error handling and edge cases.
@@ -100,7 +100,7 @@ agent-header=Focus on error handling and edge cases.
 Define types with glob-based file discovery using `include=` and `exclude=`:
 
 ```bash
-# .ctxrc
+# .ktxrc
 [type:go]
 include=*.go *.mod *.sum *.json *.yml *.yaml *.md *.toml Makefile Dockerfile
 exclude=vendor dist build
@@ -111,7 +111,7 @@ exclude=build _build site
 ```
 
 ```bash
-ktx .go                              # uses [type:go] from .ctxrc
+ktx .go                              # uses [type:go] from .ktxrc
 ktx docs/ .docs                      # documentation only
 ```
 
@@ -120,7 +120,7 @@ ktx docs/ .docs                      # documentation only
 List explicit file paths for precise domain slicing. Use `with=` to compose types:
 
 ```bash
-# .ctxrc
+# .ktxrc
 [type:health]
 with=infra
 src/app/health/page.tsx
@@ -155,7 +155,7 @@ ktx .js              # full JS scan (pattern-based, ignores file lists)
 
 `with=` resolves transitively and handles cycles. A type uses **file list** mode if it has paths listed; otherwise it uses **pattern** mode (`include=`/`exclude=`).
 
-See `.ctxrc.example` for a full template.
+See `.ktxrc.example` for a full template.
 
 ## Output
 
@@ -208,7 +208,7 @@ Follow the repository pattern in app/repositories/.
 - **Locks:** `*.lock` `package-lock.json` `pnpm-lock.yaml`
 - **Minified:** `*.min.js` `*.min.css` `*.map`
 - **Data:** `*.db` `*.sqlite` `*.sqlite3` `*.log` `*.pid` `*.out`
-- **Meta:** `LICENSE` `CHANGELOG` `compile_commands.json` `AGENTS.md` `.ctxrc`
+- **Meta:** `LICENSE` `CHANGELOG` `compile_commands.json` `AGENTS.md` `.ktxrc`
 
 Override any exclusion with `+PATTERN`.
 
