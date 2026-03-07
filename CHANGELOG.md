@@ -1,6 +1,15 @@
 # Changelog
 All notable changes to ctx will be documented in this file.
 
+## [0.6.0]
+### Added
+- **File paths in `[type:]` sections**: Domain slicing via explicit file lists. Any non-directive line in a `[type:name]` section is treated as an explicit file path
+- **`with=TYPE` composability**: Types can compose other types. `with=infra` in `[type:health]` pulls in all files from the `infra` type. Resolves transitively with cycle detection
+- **Dual-mode type sections**: A type uses **file list** mode if it has explicit paths; otherwise uses **pattern** mode (`include=`/`exclude=`). Both modes support `with=`
+
+### Changed
+- **Routing logic**: Automatically chooses between `run_files` (explicit list) and `run_find` (pattern discovery) based on type content
+
 ## [0.5.1]
 ### Changed
 - **Removed `--no-clip`**: Clipboard is now automatic when available. Behavior:
