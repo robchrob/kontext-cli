@@ -34,10 +34,12 @@ ktx [options] [modifiers...] [dir] [.type]
 | `-l N` | Token budget (`0` = unlimited) |
 | `-r` | Randomize file order |
 | `-T` | Skip directory tree |
-| `-I` | Show skipped files on stderr |
+| `-t` | Show skipped files on stderr (trace) |
 | `-c FILE` | Config file (default: nearest `.ktxrc` upward) |
 | `--raw` | No instruction header, no AGENTS.md |
+| `--no-clip` | Skip clipboard |
 | `-v` | Version |
+| `-h` | Help |
 
 ## Types
 
@@ -46,12 +48,10 @@ ktx [options] [modifiers...] [dir] [.type]
 | `default` | `*` | — |
 | `py` | `*.py *.pyw *.pyi *.toml *.cfg *.ini *.json *.yml *.yaml *.md *.txt *.rst *.j2 Makefile Dockerfile` | `__pycache__ .venv venv .mypy_cache .pytest_cache .ruff_cache .tox *.egg-info htmlcov dist build` |
 | `js` | `*.js *.ts *.jsx *.tsx *.mjs *.cjs *.json *.html *.css *.scss *.svelte *.vue *.md` | `node_modules .next .nuxt .turbo bower_components dist build out coverage .nyc_output` |
-| `go` | `*.go *.mod *.sum *.json *.yml *.yaml *.md *.toml Makefile Dockerfile` | `vendor dist build` |
-| `rs` | `*.rs *.toml *.json *.yml *.yaml *.md Makefile Dockerfile` | `target dist build` |
-| `c` | `*.c *.h *.cpp *.hpp *.cc *.cxx *.hh *.inl *.cmake *.json *.yml *.yaml *.md Makefile CMakeLists.txt` | `build .cache out` |
-| `java` | `*.java *.xml *.gradle *.properties *.yml *.yaml *.md` | `.gradle build target out` |
 
 All types also exclude `.git .svn .hg .idea .vscode .vs` + [global file blocklist](#default-exclusions).
+
+Define custom types in `.ktxrc` using `[type:name]` sections with `include=`/`exclude=` patterns or explicit file lists.
 
 ## Modifiers
 
