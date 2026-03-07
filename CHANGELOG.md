@@ -1,5 +1,36 @@
 # Changelog
-All notable changes to ctx will be documented in this file.
+
+All notable changes to this project will be documented in this file.
+
+## [0.7.0] — ktx
+
+### Changed
+- **Renamed `ctx` → `ktx`**, config `.ctxrc` → `.ktxrc` (backward compatible: `.ctxrc` still discovered)
+- **Renamed flag**: `-m/--max-tokens` → `-l/--limit`
+- **Always-excluded dirs** (`.git .svn .hg .idea .vscode .vs`) separated from per-type excludes — cleaner presets, always applied
+- **`-type d` in find prune clause**: Only directories are pruned; files with matching names (e.g. `.env`) pass through to include-pattern matching
+- **Expanded global file blocklist**: Added OS files (`Thumbs.db`, `desktop.ini`), secrets (`.env.*`, `*.pem`, `*.key`, `*.tfvars`, `*.tfstate`, etc.), more media/binary/archive types, meta files (`LICENSE`, `CHANGELOG`, `AGENTS.md`, `.ktxrc`)
+- **Pre-split global excludes into array at startup**: Eliminates repeated `set -f` / word-split inside `is_globally_excluded` hot path
+- **Combined `tok_est` into inline arithmetic** in the main file loop — avoids double `wc` calls per file
+- **Dependency order in `with=` resolution**: BFS reversed so dependencies come before the dependent type (`infra` files before `api` files)
+
+### Added
+- **`--raw` flag**: Skip instruction header and `AGENTS.md` inclusion for clean file-only output
+- **`--no-clip` flag**: Skip clipboard even when a clipboard tool is available
+- **`agent-header=` in `.ktxrc`**: Custom instruction header; empty value disables header entirely
+- **`-c FILE` flag**: Explicitly specify config file path instead of upward search
+- **Separate type argument**: `ktx src/ .js` now works alongside `ktx src/.js`
+- **File-list paths resolved relative to `.ktxrc` location** (`RC_DIR`): Predictable path resolution when config is found in a parent directory
+- **`CUSTOM_TYPES` tracking map**: Clean registration of custom pattern types and file-list types from `.ktxrc` sections
+- **`_is_known_include` function**: Dynamic include-pattern detection across all types — replaces hardcoded `Makefile`/`Dockerfile`/`CMakeLists.txt` checks in `apply_mods`
+- **`_GBL_EXCL` pre-built array**: Global excludes split once at startup for use in `is_globally_excluded`
+- **`--` option terminator**: Standard double-dash support for directories with unusual names
+
+### Fixed
+- **`set -e` safety**: All counters use `VAR=$((VAR + 1))` instead of `((VAR++))` to avoid exit-on-zero
+- **Empty-array safety with `set -u`**: Guard `${FORCE_INCLUDE[@]}` and array slicing with length checks
+- **`set -f` balanced**: All `set -f` / `set +f` pairs are balanced across all code paths including early returns
+- **Modifier application order**: `.ktxrc` global modifiers apply to the `.ktxrc`'s declared type; CLI modifiers apply to the effective type after resolution
 
 ## [0.6.4]
 ### Added
@@ -58,74 +89,61 @@ All notable changes to ctx will be documented in this file.
 
 ## [0.6.0]
 ### Added
-- **File paths in `[type:]` sections**: Domain slicing via explicit file lists. Any non-directive line in a `[type:name]` section is treated as an explicit file path
-- **`with=TYPE` composability**: Types can compose other types. `with=infra` in `[type:health]` pulls in all files from the `infra` type. Resolves transitively with cycle detection
-- **Dual-mode type sections**: A type uses **file list** mode if it has explicit paths; otherwise uses **pattern** mode (`include=`/`exclude=`). Both modes support `with=`
+- **File paths in `[type:]` sections**: Domain slicing via explicit file lists
+- **`with=TYPE` composability**: Types can compose other types. Resolves transitively with cycle detection
+- **Dual-mode type sections**: File list or pattern mode, auto-detected
 
 ### Changed
-- **Routing logic**: Automatically chooses between `run_files` (explicit list) and `run_find` (pattern discovery) based on type content
+- **Routing logic**: Chooses between `run_files` (explicit list) and `run_find` (pattern discovery) based on type content
 
 ## [0.5.1]
 ### Changed
-- **Removed `--no-clip`**: Clipboard is now automatic when available. Behavior:
-  - `ctx` → stdout + clipboard (if available)
-  - `ctx -o` → clipboard only (falls back to stdout if no clipboard)
-  - `ctx -o file.txt` → file + clipboard
-- **Made `-o/--output` file optional**: `-o` can now be used without a filename argument
-- **Simplified tree options**: Removed `-t/--tree` since tree is now default. Only `-T/--no-tree` remains to disable it
-- **Enhanced `-I/--show-ignored` summary**: Now prints a summary table at the top showing:
-  - Ignored directories count
-  - Global exclusions count
-  - Pattern mismatches count
-  - Total ignored count
-- **Updated usage documentation** to reflect new option signatures
+- **Removed `--no-clip`**: Clipboard automatic when available
+- **Made `-o/--output` file optional**
+- **Simplified tree options**: Only `-T/--no-tree` remains
+- **Enhanced `-I/--show-ignored` summary**: Prints summary table
 
 ## [0.5.0]
 ### Added
-- **`-I` / `--show-ignored` reports all four filtering layers**: Previously only showed global excludes and gitignore. Now reports:
-  - **Dir prune** (`SKIP [dir]:`): Pre-scans and reports excluded directories like `.git`, `.venv`, etc.
-  - **Include filter** (`SKIP [include]:`): Reports file count and patterns that didn't match include patterns (e.g., `847 files not matching: *.py *.pyw *.pyi ...`)
-  - **Global excludes** (`SKIP [.env]:`, etc.): Already existed, still works
-  - **Gitignore** (`SKIP [gitignore]:`): Already existed, still works
+- **`-I` reports all four filtering layers**: Dir prune, include filter, global excludes, gitignore
 
 ### Changed
-- **Summary line now shows skip counts**: When `-I` is active, shows total skipped across all layers (e.g., `853 skipped`). Without `-I`, shows only file-level skips (cheap, no extra traversal)
+- **Summary line shows skip counts** when `-I` active
 
 ## [0.4.0]
 ### Added
-- **`FORCE_INCLUDE` array**: `+` modifiers now populate it. `is_globally_excluded` checks whitelist first — `+'.env,LICENSE'` overrides global excludes
-- **`-type d` in find prune clause**: Old code pruned FILES matching exclude names too. `find -name '.env' -prune` kills the .env file before include patterns see it. Now only dirs are pruned, so `+'.env'` actually works
-- **`+` always adds to INCLUDE_PATTERNS**: `+'.env'` needs to be in the find include list for non-`*` types, otherwise find never yields it. Non-glob tokens additionally add to EXCLUDE_DIRS (backward compat: `+'vendor'` still excludes the dir)
-- **`ctx src/ .js` — separate type arg**: New trailing-arg loop consumes `.TYPE` after input. Both `ctx src/.js` and `ctx src/ .js` now work
-- **`-I` / `--show-ignored`**: Prints `SKIP [pattern]: path` to stderr for every globally-excluded or gitignored file
-- **`-r` / `--random`**: Pipes find output through `shuf -z`. Pair with `-m` for random sampling: `ctx -r -m 50000 .py`
-- **add the upward search behavior** to `load_ctxrc`. This will find the nearest .ctxrc walking up from the target directory, giving you project-wide settings
+- **`FORCE_INCLUDE` array**: `+` modifiers override global blocklist
+- **`-type d` in find prune**: Only prune directories, not files
+- **`+` always adds to INCLUDE_PATTERNS**: Non-glob tokens also add to EXCLUDE_DIRS
+- **`ctx src/ .js` — separate type arg**
+- **`-I` / `--show-ignored`**
+- **`-r` / `--random`**
+- **Upward search** in `load_ctxrc`
 
 ## [0.3.0]
 ### Added
-- **Cross-platform clipboard support**: Falls back through `pbcopy` (macOS), `wl-copy` (Wayland), `xclip` (X11), `xsel` (X11 alt), `clip` (Windows/WSL)
-- **C/C++ type preset (`.c`)**: Includes `*.c *.h *.cpp *.hpp *.cc *.cxx *.hh *.inl Makefile CMakeLists.txt *.cmake`
-- **Java type preset (`.java`)**: Includes `*.java *.xml *.gradle *.properties *.yml *.yaml *.md`
-- **`.ctxrc` config file support**: Per-project config in `.ctxrc` with `type`, `max-tokens`, `+PAT`, `-PAT`
-- **`--max-tokens` / `-m` flag**: Stop output when token budget is reached
-- **Native `.gitignore` support in `run_find`**: Uses `git ls-files -oi --exclude-standard` to skip ignored files
-- **`.ctxrc.example`**: Template for config file
+- **Cross-platform clipboard**: pbcopy, wl-copy, xclip, xsel, clip
+- **C/C++ and Java type presets**
+- **`.ctxrc` config file support**
+- **`--max-tokens` / `-m` flag**
+- **Native `.gitignore` support**
 
 ### Changed
-- Tree enabled by default (was opt-in)
-- Output uses `→` instead of "copied to"
+- Tree enabled by default
 
 ## [0.2.0]
 ### Added
-- Language type presets (`.js`, `.py`, `.go`, `.rs`)
-- Inline modifiers (`+PAT`, `-PAT`)
-- `AGENTS.md` inclusion
-- Token estimation with statistics
+- Language type presets, inline modifiers, `AGENTS.md`, token estimation
+
+## [0.7.1]
+### Changed
+- **Reduced built-in types**: Only `default`, `js`, and `py` remain built-in. Removed `go`, `rs`, `c`, `java` presets (define these in `.ktxrc` instead)
+- **Renamed flag**: `-I` / `--show-ignored` → `-t` / `--trace` (shows skipped files on stderr)
+- **Updated help text**: Now mentions defining custom types via `.ktxrc`
+
+### Removed
+- **Built-in type presets**: `go`, `rs`, `c`, `java` — moved to `.ktxrc` examples
 
 ## [0.1.0]
 ### Added
-- Initial release
-- Basic find + tree output
-- xclip clipboard support
-
-(End of file - total 100 lines)
+- Initial release: find + tree output, xclip clipboard

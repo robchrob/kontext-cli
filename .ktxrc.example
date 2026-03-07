@@ -1,5 +1,5 @@
 # .ktxrc — ktx configuration
-# ktx searches upward from target directory for .ctxrc
+# ktx searches upward from target directory for .ktxrc
 # Override with: ktx -c path/to/config
 
 # ── Global settings ───────────────────────────────
@@ -19,6 +19,10 @@
 
 # ── Custom types: pattern-based ───────────────────
 # Use include= and exclude= for glob-based file discovery
+
+# [type:docs]
+# include=*.md *.rst *.txt *.adoc
+# exclude=build _build site
 
 # [type:go]
 # include=*.go *.mod *.sum *.json *.yml *.yaml *.md *.toml Makefile Dockerfile
