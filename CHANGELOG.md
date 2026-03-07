@@ -1,9 +1,60 @@
 # Changelog
-
 All notable changes to this project will be documented in this file.
 
-## [0.7.0] — ktx
+## [0.7.6]
+### Changed
+- **Modifier semantics simplified**: `+` always adds to include patterns (and force-include); `-` with globs removes from includes, `-` with plain names removes from excluded dirs (un-skips a directory). Removed confusing dual behavior where `+NAME` could add to exclude dirs
+- **`with=` now works for pattern types**: Merges `include=` and `exclude=` lists from all dependencies via BFS DAG traversal, same cycle-safe resolution as file-list types
+- **Argument order is now free-form**: Options, modifiers, dir, and .type can be intermixed — `ktx .py -o ctx.txt` works the same as `ktx -o ctx.txt .py`
+- **Modifier detection improved**: `-` prefixed args are distinguished from unknown options using glob/length heuristics instead of relying on parse order
+- **`-o` next-arg detection**: Won't consume `.type` or modifier args as filename — `ktx -o .py` correctly treats `.py` as a type, not an output file
+- **Help text rewritten**: Clearer modifier documentation with explicit glob character explanation (`*`, `?`, `[abc]`); examples show type-first ordering
+- **README examples updated**: All examples use `ktx .type` before options (e.g., `ktx .py -l 50000` instead of `ktx -l 50000 .py`)
 
+### Added
+- **`_merge_pattern_type` function**: Merges include patterns and exclude dirs across the `with=` DAG for pattern-based types
+- **`_is_glob` helper**: Extracted glob detection into a named function for clarity
+- **Pattern composition example in `.ktxrc.example`**: `[type:fullstack]` demonstrates `with=js` for pattern types
+
+### Fixed
+- **Modifier `-` args no longer break option parsing**: Previously, `ktx .py -'*.md'` would stop at `.py` and never see the modifier. Now all args are parsed in a single pass
+
+## [0.7.5]
+### Changed
+- **Cleaned up help text**: Removed bloated modifier documentation, simplified to one line with examples
+- **Fixed help alignment**: Consistent spacing for all option descriptions
+
+## [0.7.4]
+### Added
+- **`_file_ext` helper**: Proper extension detection for dotfiles with sub-extensions (e.g., `.ktxrc.example` → `.ktxrc.example` not `.example`)
+
+### Fixed
+- **Stats table formatting**: Separate width tracking for Extension and Tokens columns; separator line now properly sized
+
+## [0.7.3]
+### Changed
+- **Simplified help**: Removed detailed type listings. Built-in types `.default`, `.js`, `.py` mentioned briefly; custom types still documented with reference to `.ktxrc.example`
+- **Improved help consistency**: All options that support long forms now show both short and long options (e.g., `-o, --output`, `-l, --limit`, `-r, --randomize`, `-T, --no-tree`, `-t, --trace`, `-c, --config`, `-v, --version`, `-h, --help`)
+
+## [0.7.2]
+### Changed
+- **`-o` behavior**: `-o` alone now outputs to stdout (no clipboard); `-o FILE` writes to file. Added `OUT_TO_FILE` flag to track this
+- **Help text**: Updated `-l` description to "Token limit (default = unlimited)", `-o` to "-o [FILE]"
+- **Custom types help**: Condensed to 2 lines referencing `.ktxrc.example`
+
+### Added
+- **`--randomize` long option**: Alternative to `-r`/`--random`
+
+## [0.7.1]
+### Changed
+- **Reduced built-in types**: Only `default`, `js`, and `py` remain built-in. Removed `go`, `rs`, `c`, `java` presets (define these in `.ktxrc` instead)
+- **Renamed flag**: `-I` / `--show-ignored` → `-t` / `--trace` (shows skipped files on stderr)
+- **Updated help text**: Now mentions defining custom types via `.ktxrc`
+
+### Removed
+- **Built-in type presets**: `go`, `rs`, `c`, `java` — moved to `.ktxrc` examples
+
+## [0.7.0] — ktx
 ### Changed
 - **Renamed `ctx` → `ktx`**, config `.ctxrc` → `.ktxrc` (backward compatible: `.ctxrc` still discovered)
 - **Renamed flag**: `-m/--max-tokens` → `-l/--limit`
@@ -134,29 +185,6 @@ All notable changes to this project will be documented in this file.
 ## [0.2.0]
 ### Added
 - Language type presets, inline modifiers, `AGENTS.md`, token estimation
-
-## [0.7.3]
-### Changed
-- **Simplified help**: Removed detailed type listings. Built-in types `.default`, `.js`, `.py` mentioned briefly; custom types still documented with reference to `.ktxrc.example`
-- **Improved help consistency**: All options that support long forms now show both short and long options (e.g., `-o, --output`, `-l, --limit`, `-r, --randomize`, `-T, --no-tree`, `-t, --trace`, `-c, --config`, `-v, --version`, `-h, --help`)
-
-## [0.7.2]
-### Changed
-- **`-o` behavior**: `-o` alone now outputs to stdout (no clipboard); `-o FILE` writes to file. Added `OUT_TO_FILE` flag to track this
-- **Help text**: Updated `-l` description to "Token limit (default = unlimited)", `-o` to "-o [FILE]"
-- **Custom types help**: Condensed to 2 lines referencing `.ktxrc.example`
-
-### Added
-- **`--randomize` long option**: Alternative to `-r`/`--random`
-
-## [0.7.1]
-### Changed
-- **Reduced built-in types**: Only `default`, `js`, and `py` remain built-in. Removed `go`, `rs`, `c`, `java` presets (define these in `.ktxrc` instead)
-- **Renamed flag**: `-I` / `--show-ignored` → `-t` / `--trace` (shows skipped files on stderr)
-- **Updated help text**: Now mentions defining custom types via `.ktxrc`
-
-### Removed
-- **Built-in type presets**: `go`, `rs`, `c`, `java` — moved to `.ktxrc` examples
 
 ## [0.1.0]
 ### Added

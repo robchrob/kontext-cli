@@ -1,32 +1,31 @@
 # ktx
-
 Codebase → LLM context. Single bash file, zero deps.
 
 ```bash
-ktx                                   # all files, cwd → clipboard
-ktx .py                               # Python project → clipboard
-ktx src/ .js                          # JS/TS in src/
-ktx -l 50000 .py                      # ~50k token budget
-ktx -r -l 50000 .py                   # random sample within budget
-ktx +'*.sql,Makefile' -'*.md' .py     # add SQL+Makefile, drop markdown
-ktx -o ctx.txt --raw .py              # file output, no header/AGENTS.md
-ktx .api                              # custom file-list type (.ktxrc)
+ktx                                   # cwd, all files → clipboard
+ktx .py                               # Python preset → clipboard
+ktx src/ .js                          # JS/TS files in src/
+ktx .py -l 50000                      # ~50k token budget
+ktx .py -r -l 50000                   # random sample within budget
+ktx .py +'*.sql,Makefile' -'*.md'     # add SQL+Makefile, drop markdown
+ktx .py -o ctx.txt                    # save to file + clipboard
+ktx --raw -o                          # stdout only + raw (pipe-friendly)
 ```
 
 Bash 4+, coreutils. Clipboard: `pbcopy` / `wl-copy` / `xclip` / `xsel`.
 
 ## Install
-
 ```bash
 curl -fsSL https://raw.githubusercontent.com/user/kontext-cli/main/ktx \
   -o ~/.local/bin/ktx && chmod +x ~/.local/bin/ktx
 ```
 
 ## Options
-
 ```
 ktx [options] [modifiers...] [dir] [.type]
 ```
+
+Options and arguments can be freely intermixed:
 
 | Flag | Description |
 |------|-------------|
@@ -42,56 +41,78 @@ ktx [options] [modifiers...] [dir] [.type]
 | `-h, --help` | Show help |
 
 ## Types
+Built-in: `.default` (all files), `.js`, `.py`. Custom types via [`.ktxrc`](#ktxrc).
 
-Built-in: `.default`, `.js`, `.py`. Define custom types in `.ktxrc` using `[type:name]` sections with `include=`/`exclude=` patterns or explicit file lists. See `.ktxrc.example` for patterns to use for Go, Rust, C/C++, Java, etc.
-
-All types exclude `.git .svn .hg .idea .vscode .vs` + [global file blocklist](#default-exclusions).
+All types auto-exclude `.git .svn .hg .idea .vscode .vs` and a [global file blocklist](#default-exclusions).
 
 ## Modifiers
+`+` includes, `-` excludes. The token after the prefix determines what gets modified:
 
-Globs (`*?[`) → include patterns. Plain names → excluded dirs.
+| Modifier | Token type | Effect |
+|----------|-----------|--------|
+| `+'*.sql'` | Glob (`*`) | Include `.sql` files |
+| `-'*.md'` | Glob (`*`) | Stop including `.md` files |
+| `-'dist'` | Plain name | Stop skipping `dist/` directory |
+| `+'.env'` | Plain name | Force-include `.env` (overrides global blocklist) |
+| `+'Makefile'` | Known include | Include `Makefile` in results |
 
-```bash
-ktx +'*.sql' .py           # add to includes
-ktx -'*.md' .py            # remove from includes
-ktx +'vendor' .go          # add to excluded dirs
-ktx -'dist' .js            # remove from excluded dirs
-ktx +'.env' .py            # force-include (overrides global blocklist)
-```
+**Glob characters**: `*` matches any string, `?` matches one character, `[abc]` matches character classes. These are standard shell glob patterns used in `case` matching against filenames.
 
-Precedence: built-in → `.ktxrc` → CLI.
+Comma-separated: `+'*.sql,*.graphql'`. Precedence: built-in → `.ktxrc` → CLI modifiers.
 
 ## .ktxrc
+Project config. Place in project root or any parent — searched upward from target dir. Also reads `.ctxrc`. Override: `-c path`.
 
-Place in project root (or any parent). Searched upward from target dir. Override: `-c path`.
+### Filtering layers
+Applied in order for every candidate file:
+
+1. **Dir pruning** — always-excluded (`.git`, …) + type's `exclude=` dirs → `find -prune`
+2. **Include patterns** — only files matching the type's globs pass (default: `*`)
+3. **Global blocklist** — OS junk, secrets, binaries, media, lockfiles ([full list](#default-exclusions))
+4. **Gitignore** — `git ls-files -oi --exclude-standard`
+5. **Token budget** — stops at `-l N`
+
+Force-include (`+pattern`) overrides layer 3.
 
 ### Global directives
-
-```ini
-type=py                                # default type
-limit=100000                           # token budget
-agent-header=Focus on error handling.  # custom header (empty = disabled)
-+*.sql,Makefile                        # add patterns
--*.md                                  # remove patterns
+```toml
+type=py                               # default type for this project
+limit=100000                          # token budget
+agent-header=Focus on error handling. # instruction header (empty = disable)
++*.sql,Makefile                       # modifier: add to active type
+-*.md                                 # modifier: remove from active type
 ```
 
-### Custom types — patterns
+### Custom types — pattern-based
+File discovery by glob. `include=` selects files, `exclude=` prunes directories.
 
-```ini
-[type:docs]
-include=*.md *.rst *.txt *.adoc
-exclude=build _build site
+```toml
+[type:go]
+include=*.go *.mod *.sum *.json Makefile Dockerfile
+exclude=vendor dist build
 ```
 
 ```bash
-ktx .docs                  # uses pattern-based discovery
+ktx .go
+```
+
+Pattern types support `with=` to compose other types. Include patterns and exclude dirs are merged from all dependencies:
+
+```toml
+[type:fullstack]
+with=js
+include=*.py *.toml Dockerfile
+exclude=__pycache__ .venv
+```
+
+```bash
+ktx .fullstack    # includes JS/TS patterns + Python patterns
 ```
 
 ### Custom types — file lists
+Explicit paths for domain slicing. Relative to `.ktxrc` location.
 
-Explicit paths for domain slicing. `with=` composes types (transitive, cycle-safe).
-
-```ini
+```toml
 [type:api]
 with=infra
 src/api/routes.ts
@@ -99,51 +120,35 @@ src/api/middleware.ts
 
 [type:infra]
 src/db/schema.ts
-src/lib/utils.ts
 package.json
 ```
 
 ```bash
-ktx .api                   # infra + api files → clipboard
+ktx .api      # collects infra files first, then api files
 ```
+`with=` composes types transitively (BFS, cycle-safe). Works for both file-list and pattern types.
 
-Type uses file-list mode if it has paths; pattern mode otherwise. See `.ktxrc.example`.
+### Type resolution
+- A type is **file-list** if it contains explicit paths, **pattern-based** otherwise. Cannot mix in one type.
+- `with=` merges dependencies: file-list types collect all files; pattern types merge include/exclude lists.
+- Resolution order: CLI type → `with=` deps (BFS) → built-in + `.ktxrc` + CLI modifiers → filtering layers.
+
+See `.ktxrc.example` for Go, Rust, C/C++, Java presets, pattern composition, and file-list examples.
 
 ## Output
-
 ```
-Extension | Files | Tokens
-----------|-------|-------
-.py       |    42 | 11,203
-.toml     |     2 |    384
+Extension      | Files | Tokens
+---------------|-------|-------
+.py            |    42 | 11,203
+.toml          |     2 |    384
 Context for '.' (type: py) → clipboard (~12,434 tokens)
 ```
 
-Content order: instruction header → `## Context` heading → directory tree → `AGENTS.md` → files with `### path/to/file` headers.
+Content structure: instruction header → `## Context` heading → directory tree → `AGENTS.md` → files (`### path`).
 
-`AGENTS.md` in target dir auto-included as system prompt. Disable with `--raw`.
+`AGENTS.md` in target dir auto-included as system prompt (disable with `--raw`).
 
 Token estimate: $\text{bytes} \times 100/680 + \text{words} \times 65/100$
 
-<details>
-<summary><strong>Default Exclusions</strong></summary>
-
-**Always excluded dirs:** `.git` `.svn` `.hg` `.idea` `.vscode` `.vs`
-
-**Global file blocklist:**
-- **OS:** `.DS_Store` `Thumbs.db` `desktop.ini`
-- **Secrets:** `.env` `.env.*` `.envrc` `*.pem` `*.key` `*.p12` `*.pfx` `.npmrc` `.netrc` `id_rsa*` `id_ed*` `*.secret` `*.credentials` `*.tfvars` `*.tfstate`
-- **Compiled:** `*.pyc` `*.pyo` `*.so` `*.dylib` `*.dll` `*.o` `*.a` `*.obj` `*.class` `*.jar` `*.exe` `*.bin`
-- **Media:** `*.png` `*.jpg` `*.jpeg` `*.gif` `*.ico` `*.svg` `*.webp` `*.bmp` `*.tiff` `*.woff` `*.woff2` `*.ttf` `*.eot` `*.otf` `*.mp3` `*.mp4` `*.wav` `*.avi` `*.mov` `*.webm` `*.pdf`
-- **Archives:** `*.zip` `*.gz` `*.tgz` `*.rar` `*.7z` `*.bz2` `*.xz`
-- **Generated:** `*.lock` `package-lock.json` `pnpm-lock.yaml` `*.min.js` `*.min.css` `*.map`
-- **Data:** `*.db` `*.sqlite` `*.sqlite3` `*.log` `*.pid` `*.out`
-- **Meta:** `LICENSE` `CHANGELOG` `compile_commands.json` `AGENTS.md` `.ktxrc`
-
-Override any exclusion with `+PATTERN`.
-
-</details>
-
 ## License
-
 MIT
