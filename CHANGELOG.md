@@ -135,6 +135,11 @@ All notable changes to this project will be documented in this file.
 ### Added
 - Language type presets, inline modifiers, `AGENTS.md`, token estimation
 
+## [0.7.3]
+### Changed
+- **Simplified help**: Removed detailed type listings. Built-in types `.default`, `.js`, `.py` mentioned briefly; custom types still documented with reference to `.ktxrc.example`
+- **Improved help consistency**: All options that support long forms now show both short and long options (e.g., `-o, --output`, `-l, --limit`, `-r, --randomize`, `-T, --no-tree`, `-t, --trace`, `-c, --config`, `-v, --version`, `-h, --help`)
+
 ## [0.7.2]
 ### Changed
 - **`-o` behavior**: `-o` alone now outputs to stdout (no clipboard); `-o FILE` writes to file. Added `OUT_TO_FILE` flag to track this

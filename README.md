@@ -30,28 +30,22 @@ ktx [options] [modifiers...] [dir] [.type]
 
 | Flag | Description |
 |------|-------------|
-| `-o [FILE]` | Write to file (no arg = stdout) |
-| `-l N` | Token limit (`0` = unlimited) |
-| `-r` | Randomize file order |
-| `-T` | Skip directory tree |
-| `-t` | Show skipped files on stderr (trace) |
-| `-c FILE` | Config file (default: nearest `.ktxrc` upward) |
+| `-o, --output [FILE]` | Write to file (no arg = stdout) |
+| `-l, --limit N` | Token limit (default = unlimited) |
+| `-r, --randomize` | Randomize file order |
+| `-T, --no-tree` | Skip directory tree |
+| `-t, --trace` | Show skipped files on stderr |
+| `-c, --config FILE` | Config file (default: nearest `.ktxrc`) |
 | `--raw` | No instruction header, no AGENTS.md |
 | `--no-clip` | Skip clipboard |
-| `-v` | Version |
-| `-h` | Help |
+| `-v, --version` | Show version |
+| `-h, --help` | Show help |
 
 ## Types
 
-| Type | Includes | Excludes |
-|------|----------|----------|
-| `default` | `*` | — |
-| `py` | `*.py *.pyw *.pyi *.toml *.cfg *.ini *.json *.yml *.yaml *.md *.txt *.rst *.j2 Makefile Dockerfile` | `__pycache__ .venv venv .mypy_cache .pytest_cache .ruff_cache .tox *.egg-info htmlcov dist build` |
-| `js` | `*.js *.ts *.jsx *.tsx *.mjs *.cjs *.json *.html *.css *.scss *.svelte *.vue *.md` | `node_modules .next .nuxt .turbo bower_components dist build out coverage .nyc_output` |
+Built-in: `.default`, `.js`, `.py`. Define custom types in `.ktxrc` using `[type:name]` sections with `include=`/`exclude=` patterns or explicit file lists. See `.ktxrc.example` for patterns to use for Go, Rust, C/C++, Java, etc.
 
-All types also exclude `.git .svn .hg .idea .vscode .vs` + [global file blocklist](#default-exclusions).
-
-Define custom types in `.ktxrc` using `[type:name]` sections with `include=`/`exclude=` patterns or explicit file lists.
+All types exclude `.git .svn .hg .idea .vscode .vs` + [global file blocklist](#default-exclusions).
 
 ## Modifiers
 
