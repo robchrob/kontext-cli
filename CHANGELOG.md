@@ -1,6 +1,31 @@
 # Changelog
 All notable changes to ctx will be documented in this file.
 
+## [0.6.3]
+### Fixed
+- **Removed `set -x`** — Was dumping every command to stderr (debug leftover)
+- **Fixed `args+=(\())` syntax error** — Extra `)` was breaking find include grouping
+- **Added `set -f`** — Prevents glob patterns like `*.egg-info` from expanding against CWD during iteration
+- **Fixed `((FILE_COUNT++))` / `((SKIP_COUNT++))`** — Post-increment returns 0 when var is 0, triggering `set -e` exit. Changed to `FILE_COUNT=$((FILE_COUNT + 1))` syntax
+- **Fixed `load_ctxrc` skipping `.` directory** — Changed `while [[ "$dir" != "." ]]` to `while [[ "$dir" != "/" ]]` so it enters the loop
+- **Fixed missing empty dir fallback** — Added `[[ -z "$dir" ]] && dir="."` after `${dir%.*}` to handle `ktx .py` case where dir becomes empty
+- **Fixed `RANDOM_ORDER` parsed but never used** — Now properly used in `run_find` with `shuf -z`
+- **Fixed `SHOW_IGNORED` parsed but never used** — Now properly used in `run_find` to print skipped files
+- **Added `-v/--version`** — Was documented but missing from main() case statement
+- **Added `-c/--config`** — Was documented but missing from main() case statement
+- **Added `CMakeLists.txt` to `apply_mods` target detection** — Was missing from glob check
+
+### Added
+- **New type presets**: `go`, `rs`, `c`, `java` — Previously only documented, now fully implemented
+- **`FILE_COUNT` tracking** — Tracks files processed for "No files found" check
+- **Simplified help text** — More compact, single-line format
+- **`--no-clip` flag** — Skip clipboard even when available
+
+### Changed
+- **Refactored `run_files` and `run_find`** — Cleaner token budget handling, unified file counting
+- **Simplified `main()` output logic** — Cleaner dests array handling
+- **Unified glob pattern handling** — Consistent `set -f` / `set +f` usage
+
 ## [0.6.0]
 ### Added
 - **File paths in `[type:]` sections**: Domain slicing via explicit file lists. Any non-directive line in a `[type:name]` section is treated as an explicit file path
