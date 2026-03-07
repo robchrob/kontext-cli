@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="0.7.2"
+VERSION="0.7.4"
 
 # ── Always-excluded directories (never traversed) ─────────────────
 ALWAYS_EXCLUDE_DIRS='.git .svn .hg .idea .vscode .vs'
@@ -118,9 +118,23 @@ _is_known_include() {
   return 1
 }
 
+# ── Extension detection ───────────────────────────────────────────
+# Dotfiles with sub-extension (.ktxrc.example) → full basename
+# Normal files → .ext; extensionless → basename
+_file_ext() {
+  local base=$1
+  if [[ $base == .*.* ]]; then
+    _ext="$base"
+  elif [[ $base == *.* ]]; then
+    _ext=".${base##*.}"
+  else
+    _ext="$base"
+  fi
+}
+
 # ── Modifier application ──────────────────────────────────────────
-# +PAT → add to includes + FORCE_INCLUDE; plain names also add to exclude dirs
-# -PAT → remove from includes (globs/known) or exclude dirs (plain names)
+# +GLOB → add to includes; +NAME → add to exclude dirs; both → FORCE_INCLUDE
+# -GLOB → remove from includes; -NAME → remove from exclude dirs
 apply_mods() {
   local type="$1"; shift
   local m body part token is_glob is_known
@@ -263,21 +277,34 @@ resolve_with() {
 # ── Statistics ─────────────────────────────────────────────────────
 show_stats() {
   (( ${#EXT_TOK[@]} == 0 )) && return
-  local header="Tokens" max=9 ext tok f
 
-  for ext in "${!EXT_TOK[@]}"; do (( ${#ext} > max )) && max=${#ext}; done
-  for tok in "${EXT_TOK[@]}"; do f=$(fmt_num "$tok"); (( ${#f} > max )) && max=${#f}; done
+  local ext tok f
+  local w_ext=9   # min width: "Extension"
+  local w_tok=6   # min width: "Tokens"
 
-  printf '%-*s | Files | %s\n' "$max" "Extension" "$header" >&2
-  local sep="" i
-  for ((i=0; i<max; i++)); do sep+="-"; done
-  printf '%s-|-------|-\n' "$sep" >&2
+  for ext in "${!EXT_TOK[@]}"; do
+    (( ${#ext} > w_ext )) && w_ext=${#ext}
+  done
+  for tok in "${EXT_TOK[@]}"; do
+    f=$(fmt_num "$tok")
+    (( ${#f} > w_tok )) && w_tok=${#f}
+  done
 
+  # Header
+  printf '%-*s | Files | %*s\n' "$w_ext" "Extension" "$w_tok" "Tokens" >&2
+
+  # Separator — each column filled to its computed width
+  local sep_ext="" sep_tok="" i
+  for ((i=0; i<w_ext; i++)); do sep_ext+="-"; done
+  for ((i=0; i<w_tok; i++)); do sep_tok+="-"; done
+  printf '%s-|-------|-%s\n' "$sep_ext" "$sep_tok" >&2
+
+  # Data rows (sorted by tokens descending)
   for ext in "${!EXT_TOK[@]}"; do
     printf '%s\t%d\t%d\n' "$ext" "${EXT_CNT[$ext]}" "${EXT_TOK[$ext]}"
   done | sort -t$'\t' -k3,3nr |
   while IFS=$'\t' read -r ext cnt raw; do
-    printf '%-*s | %5d | %*s\n' "$max" "$ext" "$cnt" "${#header}" "$(fmt_num "$raw")" >&2
+    printf '%-*s | %5d | %*s\n' "$w_ext" "$ext" "$cnt" "$w_tok" "$(fmt_num "$raw")" >&2
   done
 }
 
@@ -456,9 +483,9 @@ run_find() {
       fi
     fi
 
-    # Stats
+    # Stats — dotfiles with sub-extension use full basename
     local ext toks
-    [[ $base == *.* ]] && ext=.${base##*.} || ext=$base
+    _file_ext "$base"; ext=$_ext
     toks=$(( fsize * 100 / 680 + fwords * 65 / 100 ))
     EXT_CNT[$ext]=$(( ${EXT_CNT[$ext]:-0} + 1 ))
     EXT_TOK[$ext]=$(( ${EXT_TOK[$ext]:-0} + toks ))
@@ -529,7 +556,7 @@ run_files() {
     fi
 
     local ext toks
-    [[ $base == *.* ]] && ext=.${base##*.} || ext=$base
+    _file_ext "$base"; ext=$_ext
     toks=$(( fsize * 100 / 680 + fwords * 65 / 100 ))
     EXT_CNT[$ext]=$(( ${EXT_CNT[$ext]:-0} + 1 ))
     EXT_TOK[$ext]=$(( ${EXT_TOK[$ext]:-0} + toks ))
@@ -562,21 +589,19 @@ Options:
   -v            Version
   -h            Help
 
-Modifiers:
-  +PAT[,PAT...]  add patterns (globs → include, names → exclude dirs)
-  -PAT[,PAT...]  remove patterns
+Modifiers (token shape determines target list):
+  +GLOB         Add to include patterns    (e.g. +'*.sql')
+  +NAME         Skip this directory        (e.g. +'vendor')
+  -GLOB         Remove from include list   (e.g. -'*.md')
+  -NAME         Stop skipping directory    (e.g. -'dist')
+  Comma-separated: +'*.sql,*.graphql'
+  Force-include overrides global blocklist: +'.env'
 
-Types:
-EOF
-  for k in $(printf '%s\n' "${!INCLUDE_PATTERNS[@]}" | sort); do
-    [[ "${INCLUDE_PATTERNS[$k]}" == "__filelist__" ]] && continue
-    printf '  .%-10s %s\n' "$k" "${INCLUDE_PATTERNS[$k]}" >&2
-  done
-  cat >&2 <<'EOF'
+  GLOB = contains *, ?, or [.  Anything else = NAME.
 
-Define custom types in .ktxrc:
+Types: .default, .js, .py (built-in). Define custom types in .ktxrc:
   [type:name] with include=/exclude= patterns or file paths (one per line).
-  Use with= to compose types. See .ktxrc.example.
+  Use with= to compose file-list types. See .ktxrc.example.
 
 Examples:
   ktx                        current dir, default type
@@ -585,8 +610,8 @@ Examples:
   ktx -l 50000 .py           ~50k token limit
   ktx -r -l 50000 .py        random sample within limit
   ktx +'*.sql' -'*.md' .py   add SQL, drop markdown
-  ktx -o ctx.txt --raw .py   file output, no header/AGENTS.md
-  ktx -o                     output to stdout (no clipboard)
+  ktx -o ctx.txt .py         file output + clipboard
+  ktx -o                     stdout only (no clipboard)
 EOF
 }
 
