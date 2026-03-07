@@ -1,6 +1,36 @@
 # Changelog
 All notable changes to ctx will be documented in this file.
 
+## [0.6.4]
+### Added
+- **`.ktxrc` support**: Searches for `.ktxrc` first, then `.ctxrc` (backward compatible)
+- **`_is_known_include` function**: Dynamic include pattern detection across all types
+- **`tok_est`/`tok_est_str` functions**: Token estimation with separate calculation modes
+- **`GLOB_EXCLUDE_PATTERN`**: Pre-built glob pattern for fast case matching in `is_globally_excluded`
+- **`get_git_ignored` function**: Native gitignore integration using `git ls-files`
+- **Complete 4-layer filtering in `run_find`**:
+  - Layer 1: Directory pruning with `-I` reporting
+  - Layer 2: Include pattern matching (find-native or manual)
+  - Layer 3: Global file exclusions via `GLOB_EXCLUDE_PATTERN`
+  - Layer 4: Gitignore support via `GIT_IGNORED_MAP`
+- **`show_ignored_summary`**: Summary table of all ignored items (dirs, global, patterns)
+- **Smart output destinations**: Proper handling of `-o` with/without file, `--no-clip`, `SILENT_MODE`
+- **`run_files` token budget**: Token cap support for explicit file-list types
+- **`mapfile` header detection**: Avoids duplicate headers when files already contain path info
+
+### Changed
+- **Replaced hardcoded filenames**: `_is_known_include` replaces manual `Makefile`/`Dockerfile`/`CMakeLists.txt` checks
+- **Refactored `run_tree`**: Full gitignore integration for tree display
+- **Refactored `run_find`**: Complete rewrite with 4-layer filtering and `-I` support
+- **Updated `apply_mods`**: Uses `_is_known_include` for dynamic include detection
+- **Better config loading**: `load_ctxrc` now searches for `.ktxrc` then `.ctxrc`
+- **Preserved all working `ctx` features**: Output logic, skip counting, random order, raw mode
+
+### Fixed
+- **Restored missing functions**: `tok_est`, `show_ignored_summary`, `get_git_ignored`
+- **Fixed `run_find` layers**: All 4 filtering layers now properly implemented
+- **Fixed output destination logic**: Proper clipboard/file/stdout handling from working `ctx`
+
 ## [0.6.3]
 ### Fixed
 - **Removed `set -x`** — Was dumping every command to stderr (debug leftover)
@@ -97,3 +127,5 @@ All notable changes to ctx will be documented in this file.
 - Initial release
 - Basic find + tree output
 - xclip clipboard support
+
+(End of file - total 100 lines)
