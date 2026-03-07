@@ -1,18 +1,26 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -xeuo pipefail
 
-VERSION="0.6.0"
+VERSION="0.6.3"
 
-# ── Built-in type presets ───────────────────────────────────────────
+# ── Type presets ────────────────────────────────────────────────────
 declare -A EXCLUDE_DIRS=(
   [default]=''
   [js]='node_modules .next .nuxt .turbo bower_components dist build out coverage .nyc_output'
   [py]='__pycache__ .venv venv .mypy_cache .pytest_cache .ruff_cache .tox *.egg-info htmlcov dist build'
+  [go]='vendor dist build'
+  [rs]='target dist build'
+  [c]='build .cache out'
+  [java]='.gradle build target out'
 )
 declare -A INCLUDE_PATTERNS=(
   [default]='*'
   [js]='*.js *.ts *.jsx *.tsx *.mjs *.cjs *.json *.html *.css *.scss *.svelte *.vue *.md'
   [py]='*.py *.pyw *.pyi *.toml *.cfg *.ini *.json *.yml *.yaml *.md *.txt *.rst *.j2 Makefile Dockerfile'
+  [go]='*.go *.mod *.sum *.json *.yml *.yaml *.md *.toml Makefile Dockerfile'
+  [rs]='*.rs *.toml *.json *.yml *.yaml *.md Makefile Dockerfile'
+  [c]='*.c *.h *.cpp *.hpp *.cc *.cxx *.hh *.inl *.cmake *.json *.yml *.yaml *.md Makefile CMakeLists.txt'
+  [java]='*.java *.xml *.gradle *.properties *.yml *.yaml *.md'
 )
 
 # ── Base (always excluded dirs) ─────────────────────────────────────
@@ -20,8 +28,7 @@ BASE_EXCLUDE_DIRS='.git .svn .hg .idea .vscode .vs'
 
 # ── Global file exclusions (secrets, binaries, noise) ───────────────
 GLOBAL_EXCLUDE_FILES=(
-  .DS_Store Thumbs.db desktop.ini
-  .env '.env.*' .envrc
+  .DS_Store Thumbs.db desktop.ini .env '.env.*' .envrc
   '*.pem' '*.key' '*.p12' '*.pfx' '*.keystore' '*.jks'
   .npmrc .netrc .htpasswd 'id_rsa*' 'id_ed*'
   '*.secret' '*.credentials' '*.tfvars' '*.tfstate' '*.tfstate.*'
@@ -35,11 +42,10 @@ GLOBAL_EXCLUDE_FILES=(
   '*.min.js' '*.min.css' '*.map'
   '*.db' '*.sqlite' '*.sqlite3' '*.log' '*.pid' '*.out'
   LICENSE LICENSE.md LICENSE.txt LICENCE LICENCE.md
-  CHANGELOG CHANGELOG.md
-  compile_commands.json AGENTS.md .ctxrc
+  CHANGELOG CHANGELOG.md compile_commands.json AGENTS.md .ktxrc .ctxrc
 )
 
-# Merge base into every built-in type
+# Merge base into every type
 for _k in "${!INCLUDE_PATTERNS[@]}"; do
   EXCLUDE_DIRS[$_k]="$BASE_EXCLUDE_DIRS ${EXCLUDE_DIRS[$_k]-}"
 done; unset _k
@@ -52,16 +58,14 @@ MAX_TOKENS=0
 SHOW_IGNORED=false
 RANDOM_ORDER=false
 RAW_MODE=false
-CONFIG_PATH=""
 AGENT_HEADER="Please state the full filename with its extension in the line immediately preceding each code block!"
 IGNORED_BY=''
 SKIP_COUNT=0
-DIR_SKIP_COUNT=0
-INCLUDE_SKIP_COUNT=0
-SILENT_MODE=false
+FILE_COUNT=0
 
 tok_est() {
   local b w
+  [[ -f "$1" ]] || { echo 0; return; }
   b=$(wc -c <"$1")
   w=$(wc -w <"$1")
   echo $(( b*100/680 + w*65/100 ))
@@ -100,74 +104,52 @@ apply_mods() {
       token="${part#"${part%%[![:space:]]*}"}"
       token="${token%"${token##*[![:space:]]}"}"
       [[ -z $token ]] && continue
-      if [[ $token == *[\*\?\[]* || $token == Makefile || $token == Dockerfile || $token == CMakeLists.txt ]]; then
-        target=include
-      else
-        target=exclude
-      fi
+      target=$([[ $token == *[\*\?\[]* || $token == Makefile || $token == Dockerfile ]] && echo "include" || echo "exclude")
       if [[ ${m:0:1} == '+' ]]; then
         FORCE_INCLUDE+=("$token")
         INCLUDE_PATTERNS["$type"]=$(_add_word "${INCLUDE_PATTERNS[$type]-}" "$token")
-        [[ $target == exclude ]] && \
-          EXCLUDE_DIRS["$type"]=$(_add_word "${EXCLUDE_DIRS[$type]-}" "$token")
+        [[ $target == exclude ]] && EXCLUDE_DIRS["$type"]=$(_add_word "${EXCLUDE_DIRS[$type]-}" "$token")
       else
-        if [[ $target == include ]]; then
-          INCLUDE_PATTERNS["$type"]=$(_remove_word "${INCLUDE_PATTERNS[$type]-}" "$token")
-        else
-          EXCLUDE_DIRS["$type"]=$(_remove_word "${EXCLUDE_DIRS[$type]-}" "$token")
-        fi
+        if [[ $target == include ]]; then INCLUDE_PATTERNS["$type"]=$(_remove_word "${INCLUDE_PATTERNS[$type]-}" "$token")
+        else EXCLUDE_DIRS["$type"]=$(_remove_word "${EXCLUDE_DIRS[$type]-}" "$token"); fi
       fi
     done
   done
 }
 
-find_ctxrc() {
-  local dir
-  dir=$(cd "$1" 2>/dev/null && pwd) || return 1
-  while [[ "$dir" != "/" ]]; do
-    [[ -f "$dir/.ctxrc" ]] && { echo "$dir/.ctxrc"; return 0; }
+load_ctxrc() {
+  local dir="$1" config_file=""
+  while [[ "$dir" != "/" && "$dir" != "." ]]; do
+    if [[ -f "$dir/.ktxrc" ]]; then config_file="$dir/.ktxrc"; break; fi
+    if [[ -f "$dir/.ctxrc" ]]; then config_file="$dir/.ctxrc"; break; fi
     dir=$(dirname "$dir")
   done
-  [[ -f "/.ctxrc" ]] && { echo "/.ctxrc"; return 0; }
-  return 1
-}
-
-load_ctxrc() {
-  local config_file="$1"
   [[ -f "$config_file" ]] || return 0
 
   local section="global" section_type=""
-
   while IFS= read -r line || [[ -n $line ]]; do
     line="${line%%#*}"
     line="${line#"${line%%[![:space:]]*}"}"
     line="${line%"${line##*[![:space:]]}"}"
     [[ -z $line ]] && continue
-
-    # Section header: [type:name]
     if [[ $line =~ ^\[type:([a-zA-Z0-9_-]+)\]$ ]]; then
-      section="type"
-      section_type="${BASH_REMATCH[1]}"
+      section="type"; section_type="${BASH_REMATCH[1]}"
       if [[ -z "${INCLUDE_PATTERNS[$section_type]+_}" ]]; then
-        INCLUDE_PATTERNS[$section_type]="*"
-        EXCLUDE_DIRS[$section_type]="$BASE_EXCLUDE_DIRS"
+        INCLUDE_PATTERNS[$section_type]="*"; EXCLUDE_DIRS[$section_type]="$BASE_EXCLUDE_DIRS"
       fi
       continue
     fi
-
     if [[ $section == "type" ]]; then
       case "$line" in
         include=*) INCLUDE_PATTERNS[$section_type]="${line#include=}" ;;
         exclude=*) EXCLUDE_DIRS[$section_type]="$BASE_EXCLUDE_DIRS ${line#exclude=}" ;;
         with=*)    TYPE_WITH[$section_type]="${line#with=}" ;;
-        +*|-*)     ;; # reserved
         *)         TYPE_FILES[$section_type]+="$line"$'\n' ;;
       esac
     else
       case "$line" in
         type=*)          type_from_rc="${line#type=}" ;;
-        limit=*)         MAX_TOKENS="${line#limit=}" ;;
-        max-tokens=*)    MAX_TOKENS="${line#max-tokens=}" ;;
+        limit=*|max-tokens=*) MAX_TOKENS="${line#*=}" ;;
         agent-header=*)  AGENT_HEADER="${line#agent-header=}" ;;
         +*|-*)           MODS_FROM_RC+=("$line") ;;
       esac
@@ -175,13 +157,11 @@ load_ctxrc() {
   done < "$config_file"
 }
 
-# ── Resolve file-list types (with= composability) ──────────────────
 resolve_type_files() {
   local queue="$1" visited=" " t
   explicit_files=""
   while [[ -n "$queue" ]]; do
-    t="${queue%%,*}"
-    queue="${queue#"$t"}"; queue="${queue#,}"
+    t="${queue%%,*}"; queue="${queue#"$t"}"; queue="${queue#,}"
     t="${t#"${t%%[![:space:]]*}"}"; t="${t%"${t##*[![:space:]]}"}"
     [[ -z "$t" || "$visited" == *" $t "* ]] && continue
     visited+="$t "
@@ -192,99 +172,25 @@ resolve_type_files() {
 
 show_stats() {
   (( ${#EXT_TOK[@]} == 0 )) && return
-  local header max ext tok f tok_max
-  header="Tokens"
-
+  local header="Tokens" max ext tok f tok_max
   max=${#header}
   for ext in "${!EXT_TOK[@]}"; do (( ${#ext} > max )) && max=${#ext}; done
   (( max < 9 )) && max=9
-
   tok_max=${#header}
-  for tok in "${EXT_TOK[@]}"; do
-    f=$(fmt_num "$tok"); (( ${#f} > tok_max )) && tok_max=${#f}
-  done
-
+  for tok in "${EXT_TOK[@]}"; do f=$(fmt_num "$tok"); (( ${#f} > tok_max )) && tok_max=${#f}; done
   printf '%-*s | Files | %*s\n' "$max" "Extension" "$tok_max" "$header" >&2
-  local ext_sep tok_sep
-  ext_sep=$(printf '%*s' "$max" '' | tr ' ' '-')
-  tok_sep=$(printf '%*s' "$tok_max" '' | tr ' ' '-')
-  printf '%s-|-------|-%s\n' "$ext_sep" "$tok_sep" >&2
-
-  for ext in "${!EXT_TOK[@]}"; do
-    printf '%s\t%d\t%d\n' "$ext" "${EXT_CNT["$ext"]}" "${EXT_TOK["$ext"]}"
-  done | sort -t$'\t' -k3,3nr |
+  printf '%s-|-------|-%s\n' "$(printf '%*s' "$max" '' | tr ' ' '-')" "$(printf '%*s' "$tok_max" '' | tr ' ' '-')" >&2
+  for ext in "${!EXT_TOK[@]}"; do printf '%s\t%d\t%d\n' "$ext" "${EXT_CNT["$ext"]}" "${EXT_TOK["$ext"]}"; done | sort -t$'\t' -k3,3nr |
   while IFS=$'\t' read -r ext cnt raw; do
     printf '%-*s | %5d | %*s\n' "$max" "$ext" "$cnt" "$tok_max" "$(fmt_num "$raw")" >&2
   done
 }
 
-show_ignored_summary() {
-  local total_ignored=$((SKIP_COUNT + DIR_SKIP_COUNT + INCLUDE_SKIP_COUNT))
-  (( total_ignored == 0 )) && return
-
-  printf '\n### Ignored Summary\n' >&2
-  printf '%-20s | %s\n' "Type" "Count" >&2
-  printf '%-20s-|-%s\n' "--------------------" "-----" >&2
-
-  (( DIR_SKIP_COUNT > 0 )) && printf '%-20s | %d\n' "Directories" "$DIR_SKIP_COUNT" >&2
-  (( SKIP_COUNT > 0 )) && printf '%-20s | %d\n' "Global exclusions" "$SKIP_COUNT" >&2
-  (( INCLUDE_SKIP_COUNT > 0 )) && printf '%-20s | %d\n' "Pattern mismatches" "$INCLUDE_SKIP_COUNT" >&2
-  printf '%-20s | %d\n' "Total" "$total_ignored" >&2
-  printf '\n' >&2
-}
-
-GLOB_EXCLUDE_PATTERN=""
-for pat in "${GLOBAL_EXCLUDE_FILES[@]}"; do
-  GLOB_EXCLUDE_PATTERN+="${GLOB_EXCLUDE_PATTERN:+|}$pat"
-done
-
 is_globally_excluded() {
   local base="$1" pat
-  for pat in "${FORCE_INCLUDE[@]}"; do
-    # shellcheck disable=SC2254
-    case "$base" in $pat) return 1 ;; esac
-  done
-  # shellcheck disable=SC2254
-  case "$base" in
-    $GLOB_EXCLUDE_PATTERN) IGNORED_BY="$base"; return 0 ;;
-  esac
+  for pat in "${FORCE_INCLUDE[@]}"; do case "$base" in $pat) return 1 ;; esac; done
+  for pat in "${GLOBAL_EXCLUDE_FILES[@]}"; do case "$base" in $pat) IGNORED_BY="$pat"; return 0 ;; esac; done
   return 1
-}
-
-usage() {
-  cat >&2 <<EOF
-ktx $VERSION — dump codebase into LLM context
-
-Usage: ktx [options] [modifiers...] [dir] [.type]
-
-Options:
-  -o, --output [FILE]   Write to file (default: stdout + clipboard)
-  -T, --no-tree         Skip directory tree
-  -l, --limit N         Token budget (0 = unlimited)
-  -r, --randomize       Randomize file order (pair with -l for sampling)
-  -I, --ignored         Print skipped files to stderr
-  -c, --config FILE     Config file (default: .ctxrc, searched upward)
-      --raw             Disable instruction header and AGENTS.md
-  -h, --help            Show this help
-  -v, --version         Show version
-
-Modifiers:
-  +PAT[,PAT...]  Add: globs → include patterns, names → exclude dirs
-  -PAT[,PAT...]  Remove: globs from includes, names from excludes
-
-Built-in types: default  py  js
-Custom types via .ctxrc (patterns or file lists) — see README.
-
-Examples:
-  ktx .py                        # Python project → clipboard
-  ktx src/ .js                   # JS project in src/
-  ktx -l 50000 .py               # Cap at ~50k tokens
-  ktx -r -l 50000 .py            # Random ~50k token sample
-  ktx +'*.sql,Makefile' .py      # Add SQL files and Makefile
-  ktx -o ctx.txt .py             # Save to file + clipboard
-  ktx --raw .py                  # No instructions, just code
-  ktx .health                    # Domain slice (file list from .ctxrc)
-EOF
 }
 
 copy_to_clipboard() {
@@ -296,391 +202,119 @@ copy_to_clipboard() {
   else return 1; fi
 }
 
-get_git_ignored() {
-  git -C "$1" ls-files -oi --exclude-standard --directory 2>/dev/null | sed 's~/$~~' || true
-}
-
 run_tree() {
   local dir=$1 type=$2
-
-  if command -v tree-git-ignore >/dev/null 2>&1; then
-    printf '### Directory Tree\n'
-    tree-git-ignore -a --noreport --prune "$dir" || true
-    printf '\n'; return
-  fi
-
-  if ! command -v tree >/dev/null 2>&1; then
-    printf '### (Warning: "tree" not found, skipping tree view)\n\n'
-    return
-  fi
-
   printf '### Directory Tree\n'
-  local tree_opts=(-a --noreport --prune)
-  local ignore_pat=""
-
-  [[ -n "${EXCLUDE_DIRS[$type]-}" ]] && ignore_pat="${EXCLUDE_DIRS[$type]// /|}"
-
-  if git -C "$dir" rev-parse --is-inside-work-tree &>/dev/null; then
-    local git_ignored
-    git_ignored=$(get_git_ignored "$dir")
-    if [[ -n "$git_ignored" ]]; then
-      local git_pat
-      git_pat=$(echo "$git_ignored" | tr '\n' '|')
-      [[ -n "$ignore_pat" ]] && ignore_pat+="|$git_pat" || ignore_pat="$git_pat"
-    fi
-  fi
-
-  ignore_pat=${ignore_pat%|}
-  [[ -n "$ignore_pat" ]] && tree_opts+=(-I "$ignore_pat")
-
-  tree "${tree_opts[@]}" "$dir" || true
+  if command -v tree-git-ignore >/dev/null 2>&1; then tree-git-ignore -a --noreport --prune "$dir" || true
+  elif command -v tree >/dev/null 2>&1; then
+    local tree_opts=(-a --noreport --prune)
+    local ignore_pat="${EXCLUDE_DIRS[$type]-}"; ignore_pat="${ignore_pat// /|}"
+    [[ -n "$ignore_pat" ]] && tree_opts+=(-I "${ignore_pat%|}")
+    tree "${tree_opts[@]}" "$dir" || true
+  else printf '(tree not found)\n'; fi
   printf '\n'
 }
 
-# ── Emit explicit file list (file-list types) ──────────────────────
 run_files() {
-  local dir=$1 files_input="$2"
-  local -a file_arr=()
-  local f
-
+  local dir=$1 files_input="$2" total_bytes=0 total_words=0
   while IFS= read -r f; do
-    f="${f#"${f%%[![:space:]]*}"}"
-    f="${f%"${f##*[![:space:]]}"}"
-    [[ -n "$f" ]] && file_arr+=("$f")
+    f="${f#"${f%%[![:space:]]*}"}"; f="${f%"${f##*[![:space:]]}"}"
+    [[ -z "$f" ]] && continue
+    local fp; [[ $f == /* ]] && fp="$f" || fp="$dir/$f"
+    [[ -f "$fp" && -s "$fp" ]] || continue
+    local fsize=$(wc -c <"$fp") fwords=$(wc -w <"$fp")
+    total_bytes=$((total_bytes + fsize)); total_words=$((total_words + fwords))
+    if (( MAX_TOKENS > 0 && $(tok_est_str "$total_bytes" "$total_words") > MAX_TOKENS )); then break; fi
+    local base="${fp##*/}" ext; [[ $base == .* ]] && ext="$base" || ext=".${base##*.}"
+    EXT_CNT[$ext]=$(( ${EXT_CNT[$ext]:-0} + 1 )); EXT_TOK[$ext]=$(( ${EXT_TOK[$ext]:-0} + $(tok_est "$fp") ))
+    printf '### %s\n' "$f"; tr -d '\0' <"$fp"; printf '\n\n'; ((FILE_COUNT++))
   done <<< "$files_input"
-
-  (( ${#file_arr[@]} == 0 )) && return
-
-  if $RANDOM_ORDER && command -v shuf >/dev/null 2>&1; then
-    mapfile -t file_arr < <(printf '%s\n' "${file_arr[@]}" | shuf)
-  fi
-
-  local total_bytes=0 total_words=0
-
-  for f in "${file_arr[@]}"; do
-    local full_file
-    [[ $f == /* ]] && full_file="$f" || full_file="$dir/$f"
-
-    if [[ ! -f "$full_file" ]]; then
-      printf 'WARN: %s not found\n' "$f" >&2
-      continue
-    fi
-    [[ ! -s "$full_file" ]] && continue
-
-    local base="${full_file##*/}"
-    local fsize fwords
-    fsize=$(wc -c <"$full_file")
-    fwords=$(wc -w <"$full_file")
-    total_bytes=$((total_bytes + fsize))
-    total_words=$((total_words + fwords))
-
-    if (( MAX_TOKENS > 0 )); then
-      local running
-      running=$(tok_est_str "$total_bytes" "$total_words")
-      if (( running > MAX_TOKENS )); then
-        printf '\n--- TOKEN BUDGET REACHED (%s) ---\n' "$(fmt_num "$MAX_TOKENS")" >&2
-        break
-      fi
-    fi
-
-    local ext
-    if [[ $base == .* ]]; then ext="$base"
-    elif [[ $base == *.* ]]; then ext=".${base##*.}"
-    else ext="$base"; fi
-
-    EXT_CNT[$ext]=$(( ${EXT_CNT[$ext]:-0} + 1 ))
-    EXT_TOK[$ext]=$(( ${EXT_TOK[$ext]:-0} + $(tok_est "$full_file") ))
-
-    local -a lines
-    mapfile -n2 -t lines <"$full_file" 2>/dev/null || true
-
-    if [[ ${lines[0]:-} != *"$f"* && ${lines[1]:-} != *"$f"* && ${lines[0]:-} != *"$base"* && ${lines[1]:-} != *"$base"* ]]; then
-      printf '### %s\n' "$f"
-    fi
-    tr -d '\0' <"$full_file"; printf '\n\n'
-  done
 }
 
-# ── Emit via find (pattern-based types) ─────────────────────────────
 run_find() {
-  local dir=$1 type=$2
+  local dir=$1 type=$2 total_bytes=0 total_words=0
   local -a args=("find" "$dir")
-  local git_ignored=""
-  declare -A GIT_IGNORED_MAP=()
-
-  if git -C "$dir" rev-parse --is-inside-work-tree &>/dev/null; then
-    git_ignored=$(get_git_ignored "$dir")
-    if [[ -n "$git_ignored" ]]; then
-      while IFS= read -r -d '' f; do
-        GIT_IGNORED_MAP["$f"]=1
-      done < <(printf '%s\n' "$git_ignored" | tr '\n' '\0')
-    fi
-  fi
-
-  set -f
-
-  if $SHOW_IGNORED && [[ -n "${EXCLUDE_DIRS[$type]-}" ]]; then
-    local -a pscan=("find" "$dir")
-    pscan+=(\()
-    local first=1 d
-    for d in ${EXCLUDE_DIRS[$type]}; do
-      (( first )) || pscan+=(-o)
-      first=0
-      pscan+=(-type d -name "$d")
-    done
-    pscan+=(\) -prune -print0)
-    while IFS= read -r -d '' pruned; do
-      printf 'SKIP [dir]: %s/\n' "$pruned" >&2
-      ((DIR_SKIP_COUNT++))
-    done < <("${pscan[@]}" 2>/dev/null)
-  fi
-
   [[ -n "${EXCLUDE_DIRS[$type]-}" ]] && {
-    args+=(\()
-    local first=1 d
-    for d in ${EXCLUDE_DIRS[$type]}; do
-      (( first )) || args+=(-o)
-      first=0
-      args+=(-type d -name "$d")
-    done
-    args+=(\) -prune -o)
+    args+=(\(); local first=1; for d in ${EXCLUDE_DIRS[$type]}; do (( first )) || args+=(-o); first=0; args+=(-type d -name "$d"); done; args+=(\) -prune -o)
   }
-
-  args+=(-type f)
-
-  if [[ "${INCLUDE_PATTERNS[$type]}" != "*" ]] && ! $SHOW_IGNORED; then
-    args+=(\()
-    local first=1 pat
-    for pat in ${INCLUDE_PATTERNS[$type]}; do
-      (( first )) || args+=(-o)
-      first=0
-      args+=(-name "$pat")
-    done
-    args+=(\))
-  fi
-
-  set +f
+  args+=(-type f); [[ "${INCLUDE_PATTERNS[$type]}" != "*" ]] && {
+    args+=(\()); local first=1; for p in ${INCLUDE_PATTERNS[$type]}; do (( first )) || args+=(-o); first=0; args+=(-name "$p"); done; args+=(\))
+  }
   args+=(-print0)
-
-  local total_bytes=0 total_words=0
-
   while IFS= read -r -d '' file; do
     [[ ! -s "$file" ]] && continue
-
-    local base ext
-    base=${file##*/}
-
-    if $SHOW_IGNORED && [[ "${INCLUDE_PATTERNS[$type]}" != "*" ]]; then
-      local matched=false
-      set -f
-      for pat in ${INCLUDE_PATTERNS[$type]}; do
-        # shellcheck disable=SC2254
-        case "$base" in $pat) matched=true; break ;; esac
-      done
-      set +f
-      if ! $matched; then
-        ((INCLUDE_SKIP_COUNT++))
-        continue
-      fi
-    fi
-
-    if is_globally_excluded "$base"; then
-      $SHOW_IGNORED && printf 'SKIP [%s]: %s\n' "$IGNORED_BY" "$file" >&2
-      ((SKIP_COUNT++))
-      continue
-    fi
-
-    if [[ ${#GIT_IGNORED_MAP[@]} -gt 0 ]]; then
-      local rel="${file#$dir/}"
-      if [[ -n "${GIT_IGNORED_MAP["$rel"]-}" ]]; then
-        $SHOW_IGNORED && printf 'SKIP [gitignore]: %s\n' "$file" >&2
-        ((SKIP_COUNT++))
-        continue
-      fi
-    fi
-
-    local fsize fwords
-    fsize=$(wc -c <"$file")
-    fwords=$(wc -w <"$file")
-    total_bytes=$((total_bytes + fsize))
-    total_words=$((total_words + fwords))
-
-    if (( MAX_TOKENS > 0 )); then
-      local running
-      running=$(tok_est_str "$total_bytes" "$total_words")
-      if (( running > MAX_TOKENS )); then
-        printf '\n--- TOKEN BUDGET REACHED (%s) ---\n' "$(fmt_num "$MAX_TOKENS")" >&2
-        break
-      fi
-    fi
-
-    if [[ $base == .* ]]; then ext="$base"
-    elif [[ $base == *.* ]]; then ext=.${base##*.}
-    else ext="$base"; fi
-
-    EXT_CNT[$ext]=$(( ${EXT_CNT[$ext]:-0} + 1 ))
-    EXT_TOK[$ext]=$(( ${EXT_TOK[$ext]:-0} + $(tok_est "$file") ))
-
-    local -a lines
-    mapfile -n2 -t lines <"$file" 2>/dev/null || true
-
-    if [[ ${lines[0]:-} != *"$file"* && ${lines[1]:-} != *"$file"* && ${lines[0]:-} != *"$base"* && ${lines[1]:-} != *"$base"* ]]; then
-      printf '### %s\n' "$file"
-    fi
-    tr -d '\0' <"$file"; printf '\n\n'
-  done < <(
-    if $RANDOM_ORDER && command -v shuf >/dev/null 2>&1; then
-      "${args[@]}" 2>/dev/null | shuf -z
-    else
-      "${args[@]}" 2>/dev/null
-    fi
-  )
-
-  if $SHOW_IGNORED && (( INCLUDE_SKIP_COUNT > 0 )); then
-    printf 'SKIP [include]: %d files not matching: %s\n' "$INCLUDE_SKIP_COUNT" "${INCLUDE_PATTERNS[$type]}" >&2
-  fi
+    local base="${file##*/}"
+    if is_globally_excluded "$base"; then ((SKIP_COUNT++)); continue; fi
+    local fsize=$(wc -c <"$file") fwords=$(wc -w <"$file")
+    total_bytes=$((total_bytes + fsize)); total_words=$((total_words + fwords))
+    if (( MAX_TOKENS > 0 && $(tok_est_str "$total_bytes" "$total_words") > MAX_TOKENS )); then break; fi
+    local ext; [[ $base == .* ]] && ext="$base" || ext=".${base##*.}"
+    EXT_CNT[$ext]=$(( ${EXT_CNT[$ext]:-0} + 1 )); EXT_TOK[$ext]=$(( ${EXT_TOK[$ext]:-0} + $(tok_est "$file") ))
+    printf '### %s\n' "$file"; tr -d '\0' <"$file"; printf '\n\n'; ((FILE_COUNT++))
+  done < <("${args[@]}" 2>/dev/null)
 }
 
 main() {
-  local out_file='' out_file_explicit=false use_tree=true
-  local type_from_rc='' type_explicit=false
+  local out_file='' no_clip=false use_tree=true type_explicit=false type_from_rc='' type_arg=''
   local -a MODS=() MODS_FROM_RC=()
-
   while [[ $# -gt 0 ]]; do
     case $1 in
-      -h|--help) usage; exit 0 ;;
-      -v|--version) echo "ktx $VERSION"; exit 0 ;;
-      -o|--output)
-        if [[ $# -gt 1 && ! $2 =~ ^- && ! $2 =~ ^\+ && ! $2 =~ ^\. ]]; then
-          out_file=$2; out_file_explicit=true; shift 2
-        else
-          out_file_explicit=true; SILENT_MODE=true; shift
-        fi
-        ;;
+      -h|--help) echo "ktx $VERSION — Usage: ktx [options] [modifiers...] [dir] [.type]"; exit 0 ;;
+      -o|--output) out_file=$2; shift 2 ;;
+      --no-clip) no_clip=true; shift ;;
       -T|--no-tree) use_tree=false; shift ;;
-      -l|--limit) [[ $# -gt 1 ]] && MAX_TOKENS=$2 || { usage; exit 1; }; shift 2 ;;
+      -m|-l|--limit|--max-tokens) MAX_TOKENS=$2; shift 2 ;;
       -r|--randomize) RANDOM_ORDER=true; shift ;;
       -I|--ignored) SHOW_IGNORED=true; shift ;;
-      -c|--config) [[ $# -gt 1 ]] && CONFIG_PATH=$2 || { usage; exit 1; }; shift 2 ;;
       --raw) RAW_MODE=true; shift ;;
+      +*|-*) MODS+=("$1"); shift ;;
       *) break ;;
     esac
   done
-
-  while [[ $# -gt 0 && ( $1 == +* || $1 == -* ) ]]; do MODS+=("$1"); shift; done
 
   local input="${1:-.}"
   [[ $# -gt 0 ]] && shift
-
-  local type_arg=''
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      +*|-*) MODS+=("$1"); shift ;;
-      .*) type_arg="${1#.}"; shift ;;
+      +*|-*) MODS+=("$1") ;;
+      .*) type_arg="${1#.}" ; type_explicit=true ;;
       *) break ;;
     esac
+    shift
   done
 
-  local dir type
-  if [[ -n $type_arg ]]; then
-    dir="$input"
-    type="$type_arg"
-    type_explicit=true
-  else
-    dir=${input%.*}; type=${input##*.}
-    [[ -z $dir ]] && dir='.'
-    if [[ -z $type || $type == "$dir" ]]; then type=default; else type_explicit=true; fi
-  fi
+  local dir="$input" type="default"
+  if [[ $dir == *.* && ! -d $dir ]]; then type="${dir##*.}"; dir="${dir%.*}"; type_explicit=true; fi
+  [[ -n "$type_arg" ]] && { type="$type_arg"; type_explicit=true; }
+  [[ -d "$dir" ]] || { echo "Dir '$dir' not found" >&2; exit 1; }
 
-  [[ -d $dir ]] || { echo "Directory '$dir' not found" >&2; exit 1; }
-
-  # Load config (may define custom types)
-  if [[ -n $CONFIG_PATH ]]; then
-    [[ -f "$CONFIG_PATH" ]] || { echo "Config not found: $CONFIG_PATH" >&2; exit 1; }
-    load_ctxrc "$CONFIG_PATH"
-  else
-    local found_rc
-    if found_rc=$(find_ctxrc "$dir"); then
-      load_ctxrc "$found_rc"
-    fi
-  fi
-
+  load_ctxrc "$dir"
   [[ -n $type_from_rc && $type_explicit == false ]] && type="$type_from_rc"
-  [[ ${INCLUDE_PATTERNS[$type]+_} ]] || { echo "Unknown type '.$type'" >&2; exit 1; }
-
   (( ${#MODS_FROM_RC[@]} )) && apply_mods "$type" "${MODS_FROM_RC[@]}"
   (( ${#MODS[@]} ))         && apply_mods "$type" "${MODS[@]}"
 
-  # Resolve file-list types (with= composability)
-  local explicit_files=""
-  resolve_type_files "$type"
-  local has_explicit=false
-  [[ -n "${explicit_files//[$'\n\t ']/}" ]] && has_explicit=true
-
-  local tmp; tmp=$(mktemp)
-  local full_path; full_path=$(cd "$dir" && pwd)
-
-  if ! $RAW_MODE && [[ -n "$AGENT_HEADER" ]]; then
-    printf '%s\n\n' "$AGENT_HEADER" >> "$tmp"
-  fi
-
-  printf '## Context for %s\n' "$full_path" >> "$tmp"
-
+  local explicit_files=""; resolve_type_files "$type"
+  local tmp=$(mktemp)
+  if ! $RAW_MODE; then printf '%s\n\n' "$AGENT_HEADER" >> "$tmp"; fi
+  printf '## Context for %s\n' "$(cd "$dir" && pwd)" >> "$tmp"
   $use_tree && run_tree "$dir" "$type" >> "$tmp"
+  if ! $RAW_MODE && [[ -f "$dir/AGENTS.md" ]]; then printf '### System Prompt\n' >> "$tmp"; cat "$dir/AGENTS.md" >> "$tmp"; printf '\n\n' >> "$tmp"; fi
 
-  if ! $RAW_MODE && [[ -f "$dir/AGENTS.md" ]]; then
-    printf '### System Prompt (from AGENTS.md)\n' >> "$tmp"
-    cat "$dir/AGENTS.md" >> "$tmp"
-    printf '\n\n' >> "$tmp"
-  fi
+  if [[ -n "${explicit_files//[[:space:]]/}" ]]; then run_files "$dir" "$explicit_files" >> "$tmp"
+  else run_find "$dir" "$type" >> "$tmp"; fi
 
-  # Route: explicit file list vs pattern-based discovery
-  if $has_explicit; then
-    run_files "$dir" "$explicit_files" >> "$tmp"
-  else
-    run_find "$dir" "$type" >> "$tmp"
-  fi
-
-  local content; content=$(<"$tmp"); rm -f "$tmp"
-  [[ -z $content ]] && { echo "No files found" >&2; exit 0; }
+  local content=$(<"$tmp"); rm -f "$tmp"
+  if [[ $FILE_COUNT -eq 0 ]]; then echo "No files found" >&2; exit 0; fi
 
   local dests=()
-  local use_stdout=false use_clipboard=false
+  if ! $no_clip && copy_to_clipboard "$content"; then dests+=(clipboard); fi
+  if [[ -n "$out_file" ]]; then printf '%s' "$content" >"$out_file"; dests+=("$out_file"); fi
+  [[ ${#dests[@]} -eq 0 ]] && dests+=(stdout)
 
-  if ! $out_file_explicit; then
-    use_stdout=true
-    copy_to_clipboard "$content" 2>/dev/null && use_clipboard=true
-  elif [[ -z $out_file ]]; then
-    if copy_to_clipboard "$content" 2>/dev/null; then
-      use_clipboard=true
-    else
-      use_stdout=true
-    fi
-  else
-    printf '%s' "$content" >"$out_file"
-    dests+=("$out_file")
-    copy_to_clipboard "$content" 2>/dev/null && use_clipboard=true
-  fi
-
-  $use_stdout && dests+=("stdout")
-  $use_clipboard && dests+=("clipboard")
-
-  if $SHOW_IGNORED && ! $SILENT_MODE; then
-    show_ignored_summary
-  fi
-
-  if ! $SILENT_MODE; then
-    show_stats
-
-    local raw_total total
-    raw_total=$(( $(printf '%s' "$content" | wc -c)*100/680 + $(printf '%s' "$content" | wc -w)*65/100 ))
-    (( raw_total > 1000000 )) && printf 'WARNING: Content exceeds 1M tokens (~%s)\n' "$(fmt_num "$raw_total")" >&2
-
-    total=$(fmt_num "$raw_total")
-    echo "Context for '$dir' (type: $type) → ${dests[*]} (~$total tokens)" >&2
-  fi
-
-  $use_stdout && printf '%s' "$content"
+  show_stats
+  local total=$(fmt_num "$(( $(printf '%s' "$content" | wc -c)*100/680 + $(printf '%s' "$content" | wc -w)*65/100 ))")
+  echo "Context for '$dir' (type: $type) → ${dests[*]} (~$total tokens)" >&2
+  [[ ${dests[*]} == *stdout* ]] && printf '%s' "$content"
 }
 
 main "$@"
