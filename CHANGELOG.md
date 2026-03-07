@@ -135,6 +135,15 @@ All notable changes to this project will be documented in this file.
 ### Added
 - Language type presets, inline modifiers, `AGENTS.md`, token estimation
 
+## [0.7.2]
+### Changed
+- **`-o` behavior**: `-o` alone now outputs to stdout (no clipboard); `-o FILE` writes to file. Added `OUT_TO_FILE` flag to track this
+- **Help text**: Updated `-l` description to "Token limit (default = unlimited)", `-o` to "-o [FILE]"
+- **Custom types help**: Condensed to 2 lines referencing `.ktxrc.example`
+
+### Added
+- **`--randomize` long option**: Alternative to `-r`/`--random`
+
 ## [0.7.1]
 ### Changed
 - **Reduced built-in types**: Only `default`, `js`, and `py` remain built-in. Removed `go`, `rs`, `c`, `java` presets (define these in `.ktxrc` instead)

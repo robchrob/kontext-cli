@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="0.7.1"
+VERSION="0.7.2"
 
 # ── Always-excluded directories (never traversed) ─────────────────
 ALWAYS_EXCLUDE_DIRS='.git .svn .hg .idea .vscode .vs'
@@ -50,6 +50,7 @@ SHOW_IGNORED=false
 RAW_MODE=false
 USE_TREE=true
 OUT_FILE=''
+OUT_TO_FILE=false
 CONFIG_FILE=''
 DEFAULT_HEADER='Please state the full filename with its extension in the line immediately preceding each code block!'
 AGENT_HEADER="$DEFAULT_HEADER"
@@ -550,8 +551,8 @@ usage() {
 Usage: ktx [options] [modifiers...] [dir] [.type]
 
 Options:
-  -o FILE       Write to file (+ clipboard)
-  -l N          Token budget (0 = unlimited)
+  -o [FILE]     Write to file (no arg = stdout)
+  -l N          Token limit (default = unlimited)
   -r            Randomize file order
   -T            Skip directory tree
   -t            Show skipped files on stderr (trace)
@@ -573,16 +574,19 @@ EOF
   done
   cat >&2 <<'EOF'
 
-Define custom types in .ktxrc: [type:name] sections with include=/exclude= or file lists.
+Define custom types in .ktxrc:
+  [type:name] with include=/exclude= patterns or file paths (one per line).
+  Use with= to compose types. See .ktxrc.example.
 
 Examples:
   ktx                        current dir, default type
   ktx .py                    Python project → clipboard
   ktx src/ .js               JS/TS in src/
-  ktx -l 50000 .py           ~50k token budget
-  ktx -r -l 50000 .py        random sample within budget
+  ktx -l 50000 .py           ~50k token limit
+  ktx -r -l 50000 .py        random sample within limit
   ktx +'*.sql' -'*.md' .py   add SQL, drop markdown
   ktx -o ctx.txt --raw .py   file output, no header/AGENTS.md
+  ktx -o                     output to stdout (no clipboard)
 EOF
 }
 
@@ -595,9 +599,17 @@ main() {
     case $1 in
       -h|--help)         usage; exit 0 ;;
       -v|--version)      echo "ktx $VERSION"; exit 0 ;;
-      -o|--output)       [[ $# -gt 1 ]] && OUT_FILE=$2 || { usage; exit 1; }; shift 2 ;;
+      -o|--output)
+        OUT_TO_FILE=true
+        if [[ $# -gt 1 && ! "$2" =~ ^- ]]; then
+          OUT_FILE=$2
+          shift 2
+        else
+          shift
+        fi
+        ;;
       -l|--limit)        [[ $# -gt 1 ]] && MAX_TOKENS=$2 || { usage; exit 1; }; shift 2 ;;
-      -r|--random)       RANDOM_ORDER=true; shift ;;
+      -r|--random|--randomize) RANDOM_ORDER=true; shift ;;
       -T|--no-tree)      USE_TREE=false; shift ;;
       -t|--trace)        SHOW_IGNORED=true; shift ;;
       -c|--config)       [[ $# -gt 1 ]] && CONFIG_FILE=$2 || { usage; exit 1; }; shift 2 ;;
@@ -719,19 +731,25 @@ main() {
   # ── Deliver output ------------------------------------------------
   local -a dests=()
 
-  if ! $no_clip; then
-    if copy_to_clipboard "$content" 2>/dev/null; then
-      dests+=(clipboard)
+  # -o without path: stdout only (no clipboard)
+  if $OUT_TO_FILE && [[ -z $OUT_FILE ]]; then
+    dests+=(stdout)
+    printf '%s' "$content"
+  else
+    if ! $no_clip; then
+      if copy_to_clipboard "$content" 2>/dev/null; then
+        dests+=(clipboard)
+      fi
     fi
-  fi
 
-  if [[ -n $OUT_FILE ]]; then
-    printf '%s' "$content" > "$OUT_FILE"
-    dests+=("$OUT_FILE")
-  fi
+    if [[ -n $OUT_FILE ]]; then
+      printf '%s' "$content" > "$OUT_FILE"
+      dests+=("$OUT_FILE")
+    fi
 
-  # Fallback to stdout if nothing else succeeded
-  (( ${#dests[@]} == 0 )) && { dests+=(stdout); printf '%s' "$content"; }
+    # Fallback to stdout if nothing else succeeded
+    (( ${#dests[@]} == 0 )) && { dests+=(stdout); printf '%s' "$content"; }
+  fi
 
   # ── Summary -------------------------------------------------------
   show_stats

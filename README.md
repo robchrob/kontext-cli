@@ -30,8 +30,8 @@ ktx [options] [modifiers...] [dir] [.type]
 
 | Flag | Description |
 |------|-------------|
-| `-o FILE` | Write to file (+ clipboard) |
-| `-l N` | Token budget (`0` = unlimited) |
+| `-o [FILE]` | Write to file (no arg = stdout) |
+| `-l N` | Token limit (`0` = unlimited) |
 | `-r` | Randomize file order |
 | `-T` | Skip directory tree |
 | `-t` | Show skipped files on stderr (trace) |
