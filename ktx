@@ -197,8 +197,8 @@ resolve_type_files() {
     t="${t#"${t%%[![:space:]]*}"}"; t="${t%"${t##*[![:space:]]}"}"
     [[ -z "$t" || "$visited" == *" $t "* ]] && continue
     visited+="$t "
-    [[ -n "${TYPE_FILES[$t]+_}" ]] && explicit_files+="${TYPE_FILES[$t]}"
-    [[ -n "${TYPE_WITH[$t]+_}" ]] && queue+="${queue:+,}${TYPE_WITH[$t]}"
+    [[ -v TYPE_FILES[$t] ]] && explicit_files+="${TYPE_FILES[$t]}"
+    [[ -v TYPE_WITH[$t] ]] && queue+="${queue:+,}${TYPE_WITH[$t]}"
   done
 }
 
@@ -382,7 +382,7 @@ run_files() {
 
     printf '### %s\n' "$f"
     tr -d '\0' <"$fp"; printf '\n\n'
-    ((FILE_COUNT++))
+    FILE_COUNT=$((FILE_COUNT + 1))
   done <<< "$files_input"
 }
 
@@ -409,14 +409,14 @@ run_find() {
     pscan+=(\()
     local first=1 d
     for d in ${EXCLUDE_DIRS[$type]}; do
-      (( first )) || pscan+=(-o)
+      (( first == 0 )) && pscan+=(-o)
       first=0
       pscan+=(-type d -name "$d")
     done
     pscan+=(\) -prune -print0)
     while IFS= read -r -d '' pruned; do
       printf 'SKIP [dir]: %s/\n' "$pruned" >&2
-      ((DIR_SKIP_COUNT++))
+      DIR_SKIP_COUNT=$((DIR_SKIP_COUNT + 1))
     done < <("${pscan[@]}" 2>/dev/null)
   fi
 
@@ -425,7 +425,7 @@ run_find() {
     args+=(\()
     local first=1 d
     for d in ${EXCLUDE_DIRS[$type]}; do
-      (( first )) || args+=(-o)
+      (( first == 0 )) && args+=(-o)
       first=0
       args+=(-type d -name "$d")
     done
@@ -439,7 +439,7 @@ run_find() {
     args+=(\()
     local first=1 pat
     for pat in ${INCLUDE_PATTERNS[$type]}; do
-      (( first )) || args+=(-o)
+      (( first == 0 )) && args+=(-o)
       first=0
       args+=(-name "$pat")
     done
@@ -467,7 +467,7 @@ run_find() {
       done
       set +f
       if ! $matched; then
-        ((INCLUDE_SKIP_COUNT++))
+        INCLUDE_SKIP_COUNT=$((INCLUDE_SKIP_COUNT + 1))
         continue
       fi
     fi
@@ -475,7 +475,7 @@ run_find() {
     # Layer 3: global file exclusions
     if is_globally_excluded "$base"; then
       $SHOW_IGNORED && printf 'SKIP [%s]: %s\n' "$IGNORED_BY" "$file" >&2
-      ((SKIP_COUNT++))
+      SKIP_COUNT=$((SKIP_COUNT + 1))
       continue
     fi
 
@@ -484,7 +484,7 @@ run_find() {
       local rel="${file#$dir/}"
       if [[ -n "${GIT_IGNORED_MAP["$rel"]-}" ]]; then
         $SHOW_IGNORED && printf 'SKIP [gitignore]: %s\n' "$file" >&2
-        ((SKIP_COUNT++))
+        SKIP_COUNT=$((SKIP_COUNT + 1))
         continue
       fi
     fi
@@ -518,7 +518,7 @@ run_find() {
       printf '### %s\n' "$file"
     fi
     tr -d '\0' <"$file"; printf '\n\n'
-    ((FILE_COUNT++))
+    FILE_COUNT=$((FILE_COUNT + 1))
   done < <(
     if $RANDOM_ORDER && command -v shuf >/dev/null 2>&1; then
       "${args[@]}" 2>/dev/null | shuf -z
@@ -598,7 +598,7 @@ main() {
   (( ${#MODS[@]} ))         && apply_mods "$type" "${MODS[@]}"
 
   # Resolve file-list types
-  local explicit_files=""
+  # local explicit_files=""
   resolve_type_files "$type"
 
   local tmp; tmp=$(mktemp)
