@@ -2,6 +2,9 @@
 All notable changes to this project will be documented in this file.
 
 ## [0.7.7]
+### Fixed
+- **Token total calculation**: Fixed arithmetic expansion bug where `EXT_TOK[ext]` was treated as a literal string index instead of `$ext` variable expansion, causing `total_toks` to always be 0
+
 ### Changed
 - **79-character line limit**: All code reformatted or wrapped to stay within 79 columns
 - **Always-excluded dirs merged**: `ALWAYS_EXCLUDE_DIRS` deleted; values now live in `EXCLUDE_DIRS[default]`; new `_get_exclude_dirs()` helper merges default + type dirs
