@@ -1,6 +1,18 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## [0.7.7]
+### Changed
+- **79-character line limit**: All code reformatted or wrapped to stay within 79 columns
+- **Always-excluded dirs merged**: `ALWAYS_EXCLUDE_DIRS` deleted; values now live in `EXCLUDE_DIRS[default]`; new `_get_exclude_dirs()` helper merges default + type dirs
+- **Uniform declarations**: Presets use readable multi-line strings; blocklist is a direct array with comments per category
+- **Removed `_build_gbl_excl`**: `GLOBAL_EXCLUDE_FILES` string and `_build_gbl_excl()` eliminated; `_GBL_EXCL` defined directly as quoted array (needed for `is_globally_excluded` iteration without `set -f`)
+- **Clarified big functions**: `run_find` and `run_files` decomposed into `_build_find_args`, `_collect_file_list`, `_init_git_ignored`, `_should_skip`, `_measure_and_emit`; `main` uses standard `case`/`shift` with no custom option-vs-modifier heuristic
+- **README updated**: "always-excluded" changed to "inherit from default" for exclude dirs
+
+### Removed
+- **Dead code**: `tok_est_file` (never called)
+
 ## [0.7.6]
 ### Changed
 - **Modifier semantics simplified**: `+` always adds to include patterns (and force-include); `-` with globs removes from includes, `-` with plain names removes from excluded dirs (un-skips a directory). Removed confusing dual behavior where `+NAME` could add to exclude dirs
