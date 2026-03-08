@@ -880,7 +880,7 @@ main() {
 
   local total_toks=0 ext
   for ext in "${!EXT_TOK[@]}"; do
-    total_toks=$((total_toks + EXT_TOK[ext]))
+    total_toks=$((total_toks + EXT_TOK[$ext]))
   done
   show_stats
 

@@ -3,14 +3,15 @@ Codebase → LLM context. Single bash file, zero deps.
 
 ```bash
 ktx                                   # cwd, all files → clipboard
-ktx .py                               # Python preset → clipboard
-ktx src/ .js                          # JS/TS files in src/
-ktx .py -l 50000                      # ~50k token budget
-ktx .py -r -l 50000                   # random sample within budget
+ktx .py                               # Python preset (default) → clipboard
+ktx src/ .js                          # JS/TS files in src/ dir
+ktx .py -r -l 50000                   # random sample within <50k token size
 ktx .py +'*.sql,Makefile' -'*.md'     # add SQL+Makefile, drop markdown
 ktx .py -o ctx.txt                    # save to file + clipboard
 ktx --raw -o                          # stdout only + raw (pipe-friendly)
 ```
+#TODO example of oneliner - doing minimal working .ktxrc, saving it to file and using -c to load it - to showcase custom types
+#TODO any other way of running it should be supported in example? Something like readding ignored?
 
 Bash 4+, coreutils. Clipboard: `pbcopy` / `wl-copy` / `xclip` / `xsel`.
 
