@@ -146,7 +146,7 @@ apply_mods() {
     IFS=',' read -r -a parts <<< "$body"
     for part in "${parts[@]}"; do
       token="${part#"${part%%[![:space:]]*}"}"
-      token="${token%"${part##*[![:space:]]}"}"
+      token="${token%"${token##*[![:space:]]}"}"
       [[ -z $token ]] && continue
 
       is_glob=false; is_known=false
@@ -624,7 +624,8 @@ main() {
       -v|--version)      echo "ktx $VERSION"; exit 0 ;;
       -o|--output)
         OUT_TO_FILE=true
-        if [[ $# -gt 1 && ! "$2" =~ ^- && ! "$2" =~ ^\+ && ! "$2" =~ ^\. ]]; then
+        # FIX 1: never consume an existing directory as the output file
+        if [[ $# -gt 1 && ! "$2" =~ ^- && ! "$2" =~ ^\+ && ! "$2" =~ ^\. && ! -d "$2" ]]; then
           OUT_FILE=$2
           shift 2
         else
@@ -675,14 +676,31 @@ main() {
   if [[ -n $type_override ]]; then
     dir="$input"; type="$type_override"
   else
-    local pd=${input%.*} pt=${input##*.}
+    # FIX 2: only consider the basename for type detection so that
+    # dots in parent directories (e.g. /tmp/tmp.XXXXXX/proj) are
+    # never mistaken for a type separator.
+    local _basename
+    _basename="${input##*/}"
+    [[ -z "$_basename" ]] && _basename="$input"
+
+    local pd="${_basename%.*}" pt="${_basename##*.}"
     [[ -z $pd ]] && pd='.'
-    if [[ -z $pt || $pt == "$input" ]]; then
+
+    if [[ -z $pt || $pt == "$_basename" ]]; then
       dir="$input"; type=default
-    elif [[ -d $pd ]]; then
-      dir="$pd"; type="$pt"
+    elif [[ -d "$input" ]]; then
+      # The whole input is an existing directory → treat as dir
+      dir="$input"; type=default
     else
-      dir="$input"; type=default
+      # input looks like dir.type — split on the LAST dot in basename
+      # and reconstruct the directory portion.
+      local _dir_part="${input%.*}"
+      [[ -z "$_dir_part" ]] && _dir_part='.'
+      if [[ -d "$_dir_part" ]]; then
+        dir="$_dir_part"; type="$pt"
+      else
+        dir="$input"; type=default
+      fi
     fi
   fi
 
