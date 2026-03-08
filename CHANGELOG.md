@@ -18,6 +18,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - **Modifier `-` args no longer break option parsing**: Previously, `ktx .py -'*.md'` would stop at `.py` and never see the modifier. Now all args are parsed in a single pass
+- **`-o` flag directory safety**: Won't consume an existing directory as the output file when `-o` is used without a filename (e.g., `ktx -o /path/to/dir .py` now works correctly)
+- **Type detection from basename only**: Only considers the basename for type detection so that dots in parent directories (e.g., `/tmp/tmp.XXXXXX/proj`) are never mistaken for a type separator
 
 ## [0.7.5]
 ### Changed

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="0.2.3"
+VERSION="0.2.4"
 
 # ── Always-excluded directories (never traversed) ─────────────────
 ALWAYS_EXCLUDE_DIRS='.git .svn .hg .idea .vscode .vs'
@@ -87,19 +87,31 @@ fmt_num() {
 _add_word() {
   set -f
   local cur="$1" token="$2" w
-  for w in $cur; do [[ "$w" == "$token" ]] && { printf '%s' "$cur"; return; }; done
+  for w in $cur; do
+    if [[ "$w" == "$token" ]]; then
+      printf '%s' "$cur"
+      set +f
+      return
+    fi
+  done
   if [[ -n "$cur" ]]; then
     printf '%s %s' "$cur" "$token"
   else
     printf '%s' "$token"
   fi
+  set +f
 }
 
 _remove_word() {
   set -f
   local cur="$1" token="$2" out="" w
-  for w in $cur; do [[ "$w" == "$token" ]] || out="$out $w"; done
+  for w in $cur; do
+    if [[ "$w" != "$token" ]]; then
+      out="$out $w"
+    fi
+  done
   printf '%s' "${out#"${out%%[! ]*}"}"
+  set +f
 }
 
 _is_known_include() {
@@ -107,14 +119,14 @@ _is_known_include() {
   for t in "${!INCLUDE_PATTERNS[@]}"; do
     set -f
     for p in ${INCLUDE_PATTERNS[$t]}; do
-      [[ "$p" == "$token" ]] && { set +f; return 0; }
+      if [[ "$p" == "$token" ]]; then set +f; return 0; fi
     done
     set +f
   done
   for t in "${!CUSTOM_TYPE_INCLUDE[@]}"; do
     set -f
     for p in ${CUSTOM_TYPE_INCLUDE[$t]}; do
-      [[ "$p" == "$token" ]] && { set +f; return 0; }
+      if [[ "$p" == "$token" ]]; then set +f; return 0; fi
     done
     set +f
   done
@@ -150,8 +162,8 @@ apply_mods() {
       [[ -z $token ]] && continue
 
       is_glob=false; is_known=false
-      _is_glob "$token" && is_glob=true
-      _is_known_include "$token" && is_known=true
+      if _is_glob "$token"; then is_glob=true; fi
+      if _is_known_include "$token"; then is_known=true; fi
 
       if [[ ${m:0:1} == '+' ]]; then
         FORCE_INCLUDE+=("$token")
@@ -221,16 +233,24 @@ load_ktxrc() {
     fi
   done < "$file"
 
+  # FIX: use if/then instead of [[ ]] && to avoid a trailing exit-status
+  # of 1 that kills the caller under set -e when the last custom type
+  # processed has no exclude= directive.
   local ct
   for ct in "${!CUSTOM_TYPES[@]}"; do
     if [[ -n "${CUSTOM_TYPE_FILES[$ct]+_}" ]]; then
       : "${INCLUDE_PATTERNS[$ct]:=__filelist__}"
     else
       : "${INCLUDE_PATTERNS[$ct]:=}"
-      [[ -n "${CUSTOM_TYPE_INCLUDE[$ct]-}" ]] && INCLUDE_PATTERNS["$ct"]="${CUSTOM_TYPE_INCLUDE[$ct]}"
-      [[ -n "${CUSTOM_TYPE_EXCLUDE[$ct]-}" ]] && EXCLUDE_DIRS["$ct"]="${CUSTOM_TYPE_EXCLUDE[$ct]}"
+      if [[ -n "${CUSTOM_TYPE_INCLUDE[$ct]-}" ]]; then
+        INCLUDE_PATTERNS["$ct"]="${CUSTOM_TYPE_INCLUDE[$ct]}"
+      fi
+      if [[ -n "${CUSTOM_TYPE_EXCLUDE[$ct]-}" ]]; then
+        EXCLUDE_DIRS["$ct"]="${CUSTOM_TYPE_EXCLUDE[$ct]}"
+      fi
     fi
   done
+  return 0
 }
 
 # ── Resolve with= dependencies (cycle-safe BFS) ───────────────────
@@ -241,7 +261,7 @@ resolve_with() {
   while (( ${#queue[@]} > 0 )); do
     local cur="${queue[0]}"
     if (( ${#queue[@]} > 1 )); then queue=("${queue[@]:1}"); else queue=(); fi
-    [[ -n "${visited[$cur]+_}" ]] && continue
+    if [[ -n "${visited[$cur]+_}" ]]; then continue; fi
     visited["$cur"]=1
     order+=("$cur")
     local wv="${CUSTOM_TYPE_WITH[$cur]-}"
@@ -251,7 +271,7 @@ resolve_with() {
       for dep in "${_deps[@]}"; do
         dep="${dep#"${dep%%[![:space:]]*}"}"
         dep="${dep%"${dep##*[![:space:]]}"}"
-        [[ -n "$dep" ]] && queue+=("$dep")
+        if [[ -n "$dep" ]]; then queue+=("$dep"); fi
       done
     fi
   done
@@ -293,7 +313,7 @@ _merge_pattern_type() {
 
 # ── Statistics ─────────────────────────────────────────────────────
 show_stats() {
-  (( ${#EXT_TOK[@]} == 0 )) && return
+  if (( ${#EXT_TOK[@]} == 0 )); then return; fi
 
   local ext tok f
   local w_ext=9
@@ -383,12 +403,12 @@ run_tree() {
       local gp
       gp=$(echo "$gi" | tr '\n' '|')
       gp=${gp%|}
-      [[ -n "$ignore_pat" ]] && ignore_pat+="|$gp" || ignore_pat="$gp"
+      if [[ -n "$ignore_pat" ]]; then ignore_pat+="|$gp"; else ignore_pat="$gp"; fi
     fi
   fi
 
   ignore_pat=${ignore_pat%|}
-  [[ -n "$ignore_pat" ]] && tree_opts+=(-I "$ignore_pat")
+  if [[ -n "$ignore_pat" ]]; then tree_opts+=(-I "$ignore_pat"); fi
 
   tree "${tree_opts[@]}" "$dir" || true
   printf '\n'
@@ -406,13 +426,15 @@ run_find() {
     if [[ -n "$git_ignored" ]]; then
       local g
       while IFS= read -r g; do
-        [[ -n "$g" ]] && GIT_IGNORED_MAP["$g"]=1
+        if [[ -n "$g" ]]; then GIT_IGNORED_MAP["$g"]=1; fi
       done <<< "$git_ignored"
     fi
   fi
 
   local all_exclude_dirs="$ALWAYS_EXCLUDE_DIRS"
-  [[ -n "${EXCLUDE_DIRS[$type]-}" ]] && all_exclude_dirs+=" ${EXCLUDE_DIRS[$type]}"
+  if [[ -n "${EXCLUDE_DIRS[$type]-}" ]]; then
+    all_exclude_dirs+=" ${EXCLUDE_DIRS[$type]}"
+  fi
 
   set -f
   if [[ -n "$all_exclude_dirs" ]]; then
@@ -458,7 +480,7 @@ run_find() {
 
     if is_globally_excluded "$base"; then
       SKIP_COUNT=$((SKIP_COUNT + 1))
-      $SHOW_IGNORED && printf 'SKIP [global]: %s\n' "$file" >&2
+      if $SHOW_IGNORED; then printf 'SKIP [global]: %s\n' "$file" >&2; fi
       continue
     fi
 
@@ -466,7 +488,7 @@ run_find() {
       local rel="${file#"$dir/"}"
       if [[ -n "${GIT_IGNORED_MAP["$rel"]+_}" ]]; then
         SKIP_COUNT=$((SKIP_COUNT + 1))
-        $SHOW_IGNORED && printf 'SKIP [gitignore]: %s\n' "$file" >&2
+        if $SHOW_IGNORED; then printf 'SKIP [gitignore]: %s\n' "$file" >&2; fi
         continue
       fi
     fi
@@ -521,7 +543,7 @@ run_files() {
         f="${f#"${f%%[![:space:]]*}"}"
         f="${f%"${f##*[![:space:]]}"}"
         [[ -z "$f" ]] && continue
-        [[ "$f" == /* ]] || f="$files_base/$f"
+        if [[ "$f" != /* ]]; then f="$files_base/$f"; fi
         all_files+=("$f")
       done <<< "${CUSTOM_TYPE_FILES[$t]}"
     fi
@@ -534,7 +556,7 @@ run_files() {
   local file
   for file in "${all_files[@]}"; do
     if [[ ! -f "$file" ]]; then
-      $SHOW_IGNORED && printf 'SKIP [missing]: %s\n' "$file" >&2
+      if $SHOW_IGNORED; then printf 'SKIP [missing]: %s\n' "$file" >&2; fi
       SKIP_COUNT=$((SKIP_COUNT + 1))
       continue
     fi
@@ -624,7 +646,6 @@ main() {
       -v|--version)      echo "ktx $VERSION"; exit 0 ;;
       -o|--output)
         OUT_TO_FILE=true
-        # FIX 1: never consume an existing directory as the output file
         if [[ $# -gt 1 && ! "$2" =~ ^- && ! "$2" =~ ^\+ && ! "$2" =~ ^\. && ! -d "$2" ]]; then
           OUT_FILE=$2
           shift 2
@@ -667,7 +688,7 @@ main() {
       input="${POSITIONAL[0]}"
       local p
       for p in "${POSITIONAL[@]:1}"; do
-        [[ $p == .* && ${#p} -gt 1 ]] && type_override="${p#.}"
+        if [[ $p == .* && ${#p} -gt 1 ]]; then type_override="${p#.}"; fi
       done
       ;;
   esac
@@ -676,9 +697,6 @@ main() {
   if [[ -n $type_override ]]; then
     dir="$input"; type="$type_override"
   else
-    # FIX 2: only consider the basename for type detection so that
-    # dots in parent directories (e.g. /tmp/tmp.XXXXXX/proj) are
-    # never mistaken for a type separator.
     local _basename
     _basename="${input##*/}"
     [[ -z "$_basename" ]] && _basename="$input"
@@ -689,11 +707,8 @@ main() {
     if [[ -z $pt || $pt == "$_basename" ]]; then
       dir="$input"; type=default
     elif [[ -d "$input" ]]; then
-      # The whole input is an existing directory → treat as dir
       dir="$input"; type=default
     else
-      # input looks like dir.type — split on the LAST dot in basename
-      # and reconstruct the directory portion.
       local _dir_part="${input%.*}"
       [[ -z "$_dir_part" ]] && _dir_part='.'
       if [[ -d "$_dir_part" ]]; then
@@ -712,14 +727,24 @@ main() {
   else
     rc_file=$(find_ktxrc "$dir") || true
   fi
-  [[ -n $rc_file ]] && load_ktxrc "$rc_file"
+  # FIX: use if/then so load_ktxrc is never the right-hand side of &&
+  # where set -e would kill the script if the function returned non-zero.
+  if [[ -n $rc_file ]]; then
+    load_ktxrc "$rc_file"
+  fi
 
   # Use type from .ktxrc only if CLI did not specify one
-  [[ $type == default && -n $_TYPE_FROM_RC ]] && type="$_TYPE_FROM_RC"
+  if [[ $type == default && -n $_TYPE_FROM_RC ]]; then
+    type="$_TYPE_FROM_RC"
+  fi
 
   # Apply config modifiers and then CLI modifiers to the effective type
-  (( ${#RC_MODS[@]} > 0 )) && apply_mods "$type" "${RC_MODS[@]}"
-  (( ${#MODS[@]} > 0 ))    && apply_mods "$type" "${MODS[@]}"
+  if (( ${#RC_MODS[@]} > 0 )); then
+    apply_mods "$type" "${RC_MODS[@]}"
+  fi
+  if (( ${#MODS[@]} > 0 )); then
+    apply_mods "$type" "${MODS[@]}"
+  fi
 
   local is_filelist=false
   if [[ -n "${CUSTOM_TYPE_FILES[$type]+_}" ]]; then
@@ -738,7 +763,7 @@ main() {
 
   if ! $RAW_MODE; then
     if $AGENT_HEADER_SET; then
-      [[ -n $AGENT_HEADER ]] && printf '%s\n\n' "$AGENT_HEADER" >> "$tmp"
+      if [[ -n $AGENT_HEADER ]]; then printf '%s\n\n' "$AGENT_HEADER" >> "$tmp"; fi
     else
       printf '%s\n\n' "$DEFAULT_HEADER" >> "$tmp"
     fi
