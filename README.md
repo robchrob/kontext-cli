@@ -2,8 +2,8 @@
 Codebase → LLM context. Single bash file, zero deps.
 
 ```bash
-ktx                                   # cwd, all files → clipboard
-ktx .py                               # Python preset (default) → clipboard
+ktx                                   # cwd, all files (default, filtered as config/defaults) → clipboard
+ktx .py                               # Python preset → clipboard
 ktx src/ .js                          # JS/TS files in src/ dir
 ktx .py -r -l 50000                   # random sample within <50k token size
 ktx .py +'*.sql,Makefile' -'*.md'     # add SQL+Makefile, drop markdown
@@ -11,13 +11,14 @@ ktx .py -o ctx.txt                    # save to file + clipboard
 ktx --raw -o                          # stdout only + raw (pipe-friendly)
 ```
 #TODO example of oneliner - doing minimal working .ktxrc, saving it to file and using -c to load it - to showcase custom types
-#TODO any other way of running it should be supported in example? Something like readding ignored?
+#TODO any other way of running it should be supported in example? Something like re-adding ignored?
+#TODO i suppouse we also dont showcase all interesting combos that would showcase all possibilities there. Tool is simple but have pretty robust layer of customization (through .ktxrc/cli args)
 
-Bash 4+, coreutils. Clipboard: `pbcopy` / `wl-copy` / `xclip` / `xsel`.
+Bash 4+, coreutils (#TODO check, specify anything) . Clipboard: `pbcopy` / `wl-copy` / `xclip` / `xsel` - (#TODO document supported platforms (like Win-WSL, FreeBSD, others...).
 
 ## Install
 ```bash
-curl -fsSL https://raw.githubusercontent.com/user/kontext-cli/main/ktx \
+curl -fsSL https://raw.githubusercontent.com/rcdev/kontext-cli/main/ktx \
   -o ~/.local/bin/ktx && chmod +x ~/.local/bin/ktx
 ```
 
@@ -153,3 +154,4 @@ Token estimate: $\text{bytes} \times 100/680 + \text{words} \times 65/100$
 
 ## License
 MIT
+
