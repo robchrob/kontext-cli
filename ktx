@@ -1,16 +1,12 @@
 #!/usr/bin/env bash
-# shellcheck disable=SC2086
-# Intentional word-splitting throughout for pattern expansion
 set -euo pipefail
 
-VERSION="0.2.6"
+VERSION="0.2.7"
 
 # ── Language presets ──────────────────────────────────
-# EXCLUDE_DIRS[default] holds dirs pruned for every
-# type; each preset adds type-specific exclusions.
 declare -A EXCLUDE_DIRS=(
   [default]='
-    .git .svn .hg .idea .vscode .vs .terraform'
+    .git .svn .hg .idea .vscode .vs'
   [js]='
     node_modules .next .nuxt .turbo
     bower_components dist build out
@@ -33,37 +29,27 @@ declare -A INCLUDE_PATTERNS=(
 )
 
 # ── Global file blocklist ─────────────────────────────
-# Globs must be quoted to prevent expansion at parse
-# time.  Checked via case-glob in is_globally_excluded.
 _GBL_EXCL=(
-  # OS metadata
   .DS_Store Thumbs.db desktop.ini
-  # Secrets & credentials
   .env '.env.*' .envrc '*.pem' '*.key'
   '*.p12' '*.pfx' .npmrc .netrc
   'id_rsa*' 'id_ed*'
   '*.secret' '*.credentials'
-  '*.tfvars' '*.tfstate' '*.tfstate.backup'
-  # Compiled / binary
+  '*.tfvars' '*.tfstate'
   '*.pyc' '*.pyo' '*.so' '*.dylib' '*.dll'
   '*.o' '*.a' '*.obj' '*.class' '*.jar'
   '*.exe' '*.bin'
-  # Images, media & fonts
   '*.png' '*.jpg' '*.jpeg' '*.gif' '*.ico'
   '*.svg' '*.webp' '*.bmp' '*.tiff'
   '*.woff' '*.woff2' '*.ttf' '*.eot' '*.otf'
   '*.mp3' '*.mp4' '*.wav' '*.avi' '*.mov'
   '*.webm' '*.pdf'
-  # Archives
-  '*.zip' '*.gz' '*.tgz' '*.tar' '*.rar' '*.7z'
-  '*.bz2' '*.xz' '*.whl' '*.egg'
-  # Lock files & minified
+  '*.zip' '*.gz' '*.tgz' '*.rar' '*.7z'
+  '*.bz2' '*.xz'
   '*.lock' package-lock.json pnpm-lock.yaml
   '*.min.js' '*.min.css' '*.map'
-  # Data & logs
   '*.db' '*.sqlite' '*.sqlite3'
   '*.log' '*.pid' '*.out'
-  # Misc project files
   LICENSE CHANGELOG compile_commands.json
   AGENTS.md .ktxrc .ctxrc
 )
@@ -79,9 +65,7 @@ declare -A CUSTOM_TYPES=()
 
 MAX_TOKENS=0
 RANDOM_ORDER=false
-SHOW_IGNORED=false
 RAW_MODE=false
-NO_HEADER=false
 USE_TREE=true
 OUT_FILE=''
 OUT_TO_FILE=false
@@ -95,12 +79,90 @@ DEFAULT_HEADER='State full filename + extension'\
 ' on the line before each code block.'
 AGENT_HEADER="$DEFAULT_HEADER"
 
-# Shared file-processing state
 _BUDGET_BYTES=0
 _BUDGET_WORDS=0
 declare -A _GITIGNORED=()
 declare -a _FIND_ARGS=()
 declare -a _FILE_LIST=()
+
+# ── Trace state ───────────────────────────────────────
+TRACE_LEVEL=0
+
+# ── Trace helpers ─────────────────────────────────────
+_trace_skip() {
+  SKIP_COUNT=$((SKIP_COUNT + 1))
+  (( TRACE_LEVEL >= 1 )) || return 0
+  printf '  SKIP [%s] %s\n' "$1" "$2" >&2
+}
+
+_trace_accept() {
+  (( TRACE_LEVEL >= 2 )) || return 0
+  printf '  ACCEPT %s (~%s tok)\n' \
+    "$1" "$(fmt_num "$2")" >&2
+}
+
+# Compact config dump — one block, no fluff
+_trace_config() {
+  (( TRACE_LEVEL >= 1 )) || return 0
+  local type=$1 dir=$2 rc=$3
+
+  # Normalise word lists to single lines
+  local inc exc w
+  inc=""; set -f
+  for w in ${INCLUDE_PATTERNS[$type]-*}; do
+    inc="${inc:+$inc }$w"
+  done; set +f
+  exc=$(_get_exclude_dirs "$type")
+
+  local limit="unlimited"
+  (( MAX_TOKENS > 0 )) \
+    && limit=$(fmt_num "$MAX_TOKENS")
+
+  local flags=""
+  $RANDOM_ORDER && flags+="randomize "
+  $RAW_MODE     && flags+="raw "
+  ! $USE_TREE   && flags+="no-tree "
+
+  local hdr="(default)"
+  if $RAW_MODE; then hdr="(disabled)"
+  elif $AGENT_HEADER_SET; then
+    hdr=${AGENT_HEADER:-(empty)}
+    (( ${#hdr} > 50 )) && hdr="${hdr:0:47}..."
+  fi
+
+  local gi="no"
+  if git -C "$dir" rev-parse \
+     --is-inside-work-tree &>/dev/null; then
+    local n
+    n=$(get_git_ignored "$dir" | grep -c . || true)
+    gi="yes ($n ignored)"
+  fi
+
+  printf '── trace ──\n' >&2
+  printf '  type:       .%s\n' "$type" >&2
+  printf '  dir:        %s\n' "$dir" >&2
+  printf '  config:     %s\n' "${rc:-(none)}" >&2
+  printf '  limit:      %s\n' "$limit" >&2
+  [[ -n $flags ]] \
+    && printf '  flags:      %s\n' "$flags" >&2
+  printf '  include:    %s\n' "$inc" >&2
+  printf '  exclude:    %s\n' "$exc" >&2
+  (( ${#FORCE_INCLUDE[@]} )) \
+    && printf '  force:      %s\n' \
+         "${FORCE_INCLUDE[*]}" >&2
+  (( ${#RC_MODS[@]} )) \
+    && printf '  rc mods:    %s\n' \
+         "${RC_MODS[*]}" >&2
+  [[ -n ${CUSTOM_TYPE_WITH[$type]-} ]] && {
+    local -a chain
+    mapfile -t chain < <(resolve_with "$type")
+    printf '  with:       %s\n' \
+      "${chain[*]}" >&2
+  }
+  printf '  header:     %s\n' "$hdr" >&2
+  printf '  gitignore:  %s\n' "$gi" >&2
+  printf '── files ──\n' >&2
+}
 
 # ── Token & formatting utilities ──────────────────────
 tok_est_nums() {
@@ -121,7 +183,6 @@ fmt_num() {
   esac
 }
 
-# Sets global _ext.
 _file_ext() {
   local base=$1
   if   [[ $base == .*.* ]]; then _ext="$base"
@@ -179,8 +240,6 @@ _is_known_include() {
 _is_glob() { [[ $1 == *[\*\?\[]* ]]; }
 
 # ── Exclude-directory helpers ─────────────────────────
-# Returns a normalised, space-separated list:
-#   EXCLUDE_DIRS[default] + EXCLUDE_DIRS[$type]
 _get_exclude_dirs() {
   local type=$1 w out=""
   set -f
@@ -412,31 +471,22 @@ _init_git_ignored() {
 }
 
 # ── File filtering & output ───────────────────────────
-# Returns 0 (true) when the file should be skipped.
 _should_skip() {
   local file=$1 base=$2 dir=$3
   if is_globally_excluded "$base"; then
-    SKIP_COUNT=$((SKIP_COUNT + 1))
-    $SHOW_IGNORED \
-      && printf 'SKIP [global]: %s\n' \
-           "$file" >&2
+    _trace_skip "global" "$file"
     return 0
   fi
   if (( ${#_GITIGNORED[@]} )); then
     local rel=${file#"$dir/"}
     if [[ ${_GITIGNORED[$rel]+_} ]]; then
-      SKIP_COUNT=$((SKIP_COUNT + 1))
-      $SHOW_IGNORED \
-        && printf 'SKIP [gitignore]: %s\n' \
-             "$file" >&2
+      _trace_skip "gitignore" "$file"
       return 0
     fi
   fi
   return 1
 }
 
-# Measure, budget-check, track stats, emit content.
-# Returns 1 when the token budget is exceeded.
 _measure_and_emit() {
   local file=$1 base=${1##*/}
   local sz wd
@@ -464,16 +514,16 @@ _measure_and_emit() {
   EXT_TOK[$ext]=$(( ${EXT_TOK[$ext]:-0} + toks ))
   FILE_COUNT=$((FILE_COUNT + 1))
 
-  if ! $NO_HEADER; then
-    local -a hdr
-    mapfile -n2 -t hdr < "$file" 2>/dev/null || true
-    if [[ ${hdr[0]:-} != *"$file"* \
-       && ${hdr[1]:-} != *"$file"* \
-       && ${hdr[0]:-} != *"$base"* \
-       && ${hdr[1]:-} != *"$base"* ]]
-    then
-      printf '### %s\n' "$file"
-    fi
+  _trace_accept "$file" "$toks"
+
+  local -a hdr
+  mapfile -n2 -t hdr < "$file" 2>/dev/null || true
+  if [[ ${hdr[0]:-} != *"$file"* \
+     && ${hdr[1]:-} != *"$file"* \
+     && ${hdr[0]:-} != *"$base"* \
+     && ${hdr[1]:-} != *"$base"* ]]
+  then
+    printf '### %s\n' "$file"
   fi
   tr -d '\0' < "$file"
   printf '\n\n'
@@ -554,20 +604,28 @@ _build_find_args() {
   _FIND_ARGS+=(-print0)
 }
 
+_trace_pruned_dirs() {
+  (( TRACE_LEVEL >= 1 )) || return 0
+  local dir=$1 type=$2
+  local excl d
+  excl=$(_get_exclude_dirs "$type")
+  set -f
+  for d in $excl; do
+    [[ -d "$dir/$d" ]] \
+      && _trace_skip "dir-prune" "$dir/$d/"
+  done
+  set +f
+}
+
 run_find() {
   local dir=$1 type=$2
   _init_git_ignored "$dir"
+  _trace_pruned_dirs "$dir" "$type"
   _build_find_args "$dir" "$type"
 
-  if $SHOW_IGNORED; then
-    local excl d
-    excl=$(_get_exclude_dirs "$type")
-    set -f
-    for d in $excl; do
-      [[ -d "$dir/$d" ]] \
-        && printf 'SKIP [dir-prune]: %s/\n' "$d" >&2
-    done
-    set +f
+  if (( TRACE_LEVEL >= 2 )); then
+    printf '  find: %s\n' \
+      "${_FIND_ARGS[*]}" >&2
   fi
 
   local tmp; tmp=$(mktemp)
@@ -576,7 +634,6 @@ run_find() {
     find "${_FIND_ARGS[@]}" 2>/dev/null \
       | shuf -z > "$tmp" || true
   else
-    # Deterministic lexicographic order
     find "${_FIND_ARGS[@]}" 2>/dev/null \
       | sort -z > "$tmp" || true
   fi
@@ -615,6 +672,15 @@ run_files() {
   local dir=$1 type=$2
   _collect_file_list "$dir" "$type"
 
+  if (( TRACE_LEVEL >= 2 )); then
+    printf '  file list (%d):\n' \
+      "${#_FILE_LIST[@]}" >&2
+    local f
+    for f in "${_FILE_LIST[@]}"; do
+      printf '    %s\n' "$f" >&2
+    done
+  fi
+
   if $RANDOM_ORDER \
      && (( ${#_FILE_LIST[@]} )) \
      && command -v shuf >/dev/null 2>&1; then
@@ -626,10 +692,7 @@ run_files() {
   local file
   for file in "${_FILE_LIST[@]}"; do
     if [[ ! -f $file ]]; then
-      $SHOW_IGNORED \
-        && printf 'SKIP [missing]: %s\n' \
-             "$file" >&2
-      SKIP_COUNT=$((SKIP_COUNT + 1))
+      _trace_skip "missing" "$file"
       continue
     fi
     _measure_and_emit "$file" || break
@@ -696,10 +759,9 @@ Options:
   -l, --limit N        Token limit (unlimited)
   -r, --randomize      Randomize file order
   -T, --no-tree        Skip directory tree
-  -t, --trace          Show skipped files on stderr
+  -t, --trace          Trace (-t config+skips, -tt +accepts)
   -c, --config FILE    Config (default: nearest .ktxrc)
   --raw                No header, no AGENTS.md, no tree
-  --no-header          No ### file headers (implies --no-tree)
   --no-clip            Skip clipboard
   -v, --version        Show version
   -h, --help           Show help
@@ -722,6 +784,8 @@ Examples:
   ktx .py +'*.sql' -'*.md'  add SQL, drop md
   ktx .py -o ctx.txt        file + clipboard
   ktx -o                    stdout only
+  ktx -t .py                trace config + skips
+  ktx -tt .py               + accepted files
 EOF
 }
 
@@ -743,18 +807,20 @@ main() {
       -l|--limit)
         MAX_TOKENS=${2:?-l requires N}
         [[ $MAX_TOKENS =~ ^[0-9]+$ ]] || {
-          echo "Error: --limit requires a numeric value" >&2
+          echo "Error: --limit requires a number" >&2
           exit 1
         }
         shift ;;
       -r|--random*)  RANDOM_ORDER=true ;;
       -T|--no-tree)  USE_TREE=false ;;
-      -t|--trace)    SHOW_IGNORED=true ;;
+      -tt)           TRACE_LEVEL=2 ;;
+      -t|--trace)
+        TRACE_LEVEL=$((TRACE_LEVEL + 1)) ;;
       -c|--config)
         CONFIG_FILE=${2:?-c requires FILE}
         shift ;;
-      --no-header)   NO_HEADER=true ;;
-      --raw)         RAW_MODE=true; USE_TREE=false ;;
+      --raw)
+        RAW_MODE=true; USE_TREE=false ;;
       --no-clip)     no_clip=true ;;
       --)            shift; break ;;
       --*)
@@ -782,7 +848,13 @@ main() {
       elif [[ -d $a ]]; then
         dir=$a
       else
-        dir=$a
+        local ext=${a##*.} pfx=${a%.*}
+        if [[ $ext != "$a" && -n $pfx \
+           && -d ${pfx:-.} ]]; then
+          dir=${pfx:-.}; type=$ext
+        else
+          dir=$a
+        fi
       fi ;;
     *)
       dir=${positional[0]}
@@ -791,11 +863,11 @@ main() {
         [[ $p == .?* ]] && type=${p#.}
       done ;;
   esac
+  dir=${dir%/}
   [[ -d $dir ]] || {
     echo "Directory '$dir' not found" >&2
     exit 1
   }
-  dir=${dir%/}
 
   # ── Load config ─────────────────────────────────
   local rc=""
@@ -823,8 +895,7 @@ main() {
   if [[ ${CUSTOM_TYPE_FILES[$type]+_} ]]; then
     is_filelist=true
   elif [[ ! ${INCLUDE_PATTERNS[$type]+_} ]]; then
-    echo "Type '.$type' has no include patterns or files" >&2
-    exit 1
+    echo "Unknown type '.$type'" >&2; exit 1
   fi
 
   if ! $is_filelist \
@@ -833,10 +904,14 @@ main() {
     _merge_pattern_type "$type"
   fi
 
-  # ── Build output ────────────────────────────────
-  local tmp full_path
-  tmp=$(mktemp)
+  # ── Trace: show resolved config ─────────────────
+  local full_path
   full_path=$(cd "$dir" >/dev/null 2>&1 && pwd)
+  _trace_config "$type" "$full_path" "$rc"
+
+  # ── Build output ────────────────────────────────
+  local tmp
+  tmp=$(mktemp)
 
   if ! $RAW_MODE; then
     if $AGENT_HEADER_SET; then
@@ -903,7 +978,6 @@ main() {
   done
   show_stats
 
-  # Test suite relies on this format on stderr
   local summary
   summary=$(printf \
     'Context for: type: %s, files: %d, tokens: %s'\
