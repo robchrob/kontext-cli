@@ -22,13 +22,13 @@ declare -A INCLUDE_PATTERNS=(
     *.toml *.json *.yml *.yaml *.md *.j2'
 )
 _GBL_EXCL=(
-  AGENTS.md .ktxrc
+  AGENTS.md LICENSE .ktxrc
   .DS_Store Thumbs.db desktop.ini
-  .env '.env.*' .envrc
+  .env* '.env.*'
   '*.pem' '*.key' '*.p12' '*.pfx'
   .npmrc .netrc
   'id_rsa*' 'id_ed*'
-  '*.secret' '*.credentials'
+  '*.secret*' '*.cred*'
   '*.tfvars' '*.tfstate'
   '*.pyc' '*.pyo'
   '*.so' '*.dylib' '*.dll'
@@ -48,7 +48,7 @@ _GBL_EXCL=(
   '*.min.js' '*.min.css' '*.map'
   '*.db' '*.sqlite' '*.sqlite3'
   '*.log' '*.pid' '*.out'
-  LICENSE compile_commands.json
+  compile_commands.json
 )
 
 declare -a FORCE_INCLUDE=() RC_MODS=()
@@ -61,8 +61,7 @@ USE_TREE=true USE_AGENTS=true DRY_RUN=false
 OUT_FILE='' OUT_TO_FILE=false CONFIG_FILE=''
 FILE_COUNT=0 SKIP_COUNT=0 RC_DIR='' _TYPE_FROM_RC=''
 
-INSTR_HEADER='State full filename + extension on '\
-'the line before each code block.'
+INSTR_HEADER='State full filename + extension on the line before each code block.'
 AGENTS_FILE='AGENTS.md'
 
 _BUDGET_BYTES=0 _BUDGET_WORDS=0 TRACE_LEVEL=0
@@ -191,7 +190,7 @@ _trace_config() {
   fi
   printf '── trace ──\n' >&2
   printf '  %-12s %s\n' \
-    "type:" ".$type" \
+    "type:" "$type" \
     "dir:" "$dir" \
     "config:" "${rc:-(none)}" \
     "limit:" "$limit" >&2
@@ -335,6 +334,10 @@ load_ktxrc() {
           else
             AGENTS_FILE="$val"
           fi ;;
+        no-agents=true)
+          USE_AGENTS=false ;;
+        no-tree=true)
+          USE_TREE=false ;;
         +*|-*)
           RC_MODS+=("$line") ;;
       esac
@@ -522,7 +525,10 @@ _build_find_args() {
   fi
   _FIND_ARGS+=(-type f)
   local pats=${INCLUDE_PATTERNS[$type]-*}
-  if [[ $pats != '*' ]]; then
+  if [[ -z $pats ]]; then
+    # empty include= — match nothing
+    _FIND_ARGS+=(-name '__no_match__')
+  elif [[ $pats != '*' ]]; then
     _FIND_ARGS+=( \( ); local first=1 p
     for p in $pats; do
       (( first )) || _FIND_ARGS+=(-o)
@@ -689,7 +695,7 @@ main() {
       -l|--limit)
         MAX_TOKENS=${2:?-l requires N}
         if [[ ! $MAX_TOKENS =~ ^[0-9]+$ ]]; then
-          echo "Error: --limit needs a number" >&2
+          echo "Error: --limit requires a number" >&2
           exit 1
         fi; shift ;;
       -r|--random*) RANDOM_ORDER=true ;;
@@ -761,11 +767,14 @@ main() {
   elif [[ ! ${INCLUDE_PATTERNS[$type]+_} \
        || -z ${INCLUDE_PATTERNS[$type]-} ]]; then
     # Check for include= from custom type config
-    if [[ -n ${CUSTOM_TYPE_INCLUDE[$type]-} ]]; then
+    if [[ ${CUSTOM_TYPE_INCLUDE[$type]+_} ]]; then
+      # key exists (even if empty) — explicit include= directive
       INCLUDE_PATTERNS[$type]="${CUSTOM_TYPE_INCLUDE[$type]}"
+    elif [[ ${CUSTOM_TYPES[$type]+_} ]]; then
+      # known custom type with no include= — treat as empty
+      INCLUDE_PATTERNS[$type]=""
     else
-      echo "Type '.$type' has no include patterns"\
-        " or files" >&2
+      echo "Type '.$type' has no include patterns or files" >&2
       exit 1
     fi
   fi
@@ -848,9 +857,9 @@ main() {
   done
   show_stats
   printf '\n' >&2
-  printf 'Copied %d files (~%s tokens) → %s\n' \
+  printf 'Copied %d files (~%s tokens) → %s  [type: %s]\n' \
     "$FILE_COUNT" "$(fmt_num "$total_toks")" \
-    "${dests[*]}" >&2
+    "${dests[*]}" "$type" >&2
 }
 
 main "$@"
