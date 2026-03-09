@@ -9,12 +9,31 @@ ktx .py -r -l 50000                   # random sample within <50k token size
 ktx .py +'*.sql,Makefile' -'*.md'     # add SQL+Makefile, drop markdown
 ktx .py -o ctx.txt                    # save to file + clipboard
 ktx --raw -o                          # stdout only + raw (pipe-friendly)
-```
-#TODO example of oneliner - doing minimal working .ktxrc, saving it to file and using -c to load it - to showcase custom types
-#TODO any other way of running it should be supported in example? Something like re-adding ignored?
-#TODO i suppouse we also dont showcase all interesting combos that would showcase all possibilities there. Tool is simple but have pretty robust layer of customization (through .ktxrc/cli args)
 
-Bash 4+, coreutils (#TODO check, specify anything) . Clipboard: `pbcopy` / `wl-copy` / `xclip` / `xsel` - (#TODO document supported platforms (like Win-WSL, FreeBSD, others...).
+# Quick custom type on the fly
+echo -e '[type:go]\ninclude=*.go go.mod go.sum Makefile' > .ktxrc
+ktx .go
+```
+
+## Prerequisites
+
+- **Bash 4.0+** (macOS ships Bash 3 — `brew install bash`)
+- **coreutils**: `find`, `wc`, `tr`, `sort`, `mktemp`, `sed` (standard on Linux/macOS)
+- **Optional**: `tree` or `tree-git-ignore` (for directory tree output)
+- **Clipboard** (optional, auto-detected):
+  - macOS: `pbcopy` (built-in)
+  - Linux/Wayland: `wl-copy` (`wl-clipboard`)
+  - Linux/X11: `xclip` or `xsel`
+  - WSL/Windows: `clip.exe` (built-in)
+
+## Platform Support
+
+| Platform | Status | Notes |
+|----------|--------|-------|
+| Linux | ✅ Supported | All features work |
+| macOS | ✅ Supported | Requires Bash 4+ via Homebrew |
+| WSL (Windows) | ✅ Supported | Uses Windows clipboard via `clip.exe` |
+| FreeBSD | ⚠️ Experimental | May need GNU coreutils |
 
 ## Install
 ```bash
@@ -33,11 +52,12 @@ Options and arguments can be freely intermixed:
 |------|-------------|
 | `-o, --output [FILE]` | Write to file (no arg = stdout) |
 | `-l, --limit N` | Token limit (default = unlimited) |
-| `-r, --randomize` | Randomize file order |
+| `-r, --randomize` | Randomize file order (default: sorted) |
 | `-T, --no-tree` | Skip directory tree |
 | `-t, --trace` | Show skipped files on stderr |
 | `-c, --config FILE` | Config file (default: nearest `.ktxrc`) |
-| `--raw` | No instruction header, no AGENTS.md |
+| `--raw` | No header, no AGENTS.md, no tree (pipe-friendly) |
+| `--no-header` | Suppress `### filename` headers |
 | `--no-clip` | Skip clipboard |
 | `-v, --version` | Show version |
 | `-h, --help` | Show help |
@@ -64,6 +84,22 @@ Comma-separated: `+'*.sql,*.graphql'`. Precedence: built-in → `.ktxrc` → CLI
 
 ## .ktxrc
 Project config. Place in project root or any parent — searched upward from target dir. Also reads `.ctxrc`. Override: `-c path`.
+
+### Quick Start with Custom Types
+
+Create a custom type on the fly:
+
+```bash
+# Create a Go type and use it immediately
+echo -e '[type:go]\ninclude=*.go go.mod go.sum Makefile' > .ktxrc
+ktx .go
+```
+
+Or use an inline config for one-off runs:
+
+```bash
+ktx -c <(echo -e '[type:go]\ninclude=*.go go.mod') .go
+```
 
 ### Filtering layers
 Applied in order for every candidate file:

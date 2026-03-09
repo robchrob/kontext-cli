@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2086
+# Intentional word-splitting throughout for pattern expansion
 set -euo pipefail
 
-VERSION="0.7.7"
+VERSION="0.7.8"
 
 # ── Language presets ──────────────────────────────────
 # EXCLUDE_DIRS[default] holds dirs pruned for every
 # type; each preset adds type-specific exclusions.
 declare -A EXCLUDE_DIRS=(
   [default]='
-    .git .svn .hg .idea .vscode .vs'
+    .git .svn .hg .idea .vscode .vs .terraform'
   [js]='
     node_modules .next .nuxt .turbo
     bower_components dist build out
@@ -41,7 +43,7 @@ _GBL_EXCL=(
   '*.p12' '*.pfx' .npmrc .netrc
   'id_rsa*' 'id_ed*'
   '*.secret' '*.credentials'
-  '*.tfvars' '*.tfstate'
+  '*.tfvars' '*.tfstate' '*.tfstate.backup'
   # Compiled / binary
   '*.pyc' '*.pyo' '*.so' '*.dylib' '*.dll'
   '*.o' '*.a' '*.obj' '*.class' '*.jar'
@@ -53,8 +55,8 @@ _GBL_EXCL=(
   '*.mp3' '*.mp4' '*.wav' '*.avi' '*.mov'
   '*.webm' '*.pdf'
   # Archives
-  '*.zip' '*.gz' '*.tgz' '*.rar' '*.7z'
-  '*.bz2' '*.xz'
+  '*.zip' '*.gz' '*.tgz' '*.tar' '*.rar' '*.7z'
+  '*.bz2' '*.xz' '*.whl' '*.egg'
   # Lock files & minified
   '*.lock' package-lock.json pnpm-lock.yaml
   '*.min.js' '*.min.css' '*.map'
@@ -79,6 +81,7 @@ MAX_TOKENS=0
 RANDOM_ORDER=false
 SHOW_IGNORED=false
 RAW_MODE=false
+NO_HEADER=false
 USE_TREE=true
 OUT_FILE=''
 OUT_TO_FILE=false
@@ -461,14 +464,16 @@ _measure_and_emit() {
   EXT_TOK[$ext]=$(( ${EXT_TOK[$ext]:-0} + toks ))
   FILE_COUNT=$((FILE_COUNT + 1))
 
-  local -a hdr
-  mapfile -n2 -t hdr < "$file" 2>/dev/null || true
-  if [[ ${hdr[0]:-} != *"$file"* \
-     && ${hdr[1]:-} != *"$file"* \
-     && ${hdr[0]:-} != *"$base"* \
-     && ${hdr[1]:-} != *"$base"* ]]
-  then
-    printf '### %s\n' "$file"
+  if ! $NO_HEADER; then
+    local -a hdr
+    mapfile -n2 -t hdr < "$file" 2>/dev/null || true
+    if [[ ${hdr[0]:-} != *"$file"* \
+       && ${hdr[1]:-} != *"$file"* \
+       && ${hdr[0]:-} != *"$base"* \
+       && ${hdr[1]:-} != *"$base"* ]]
+    then
+      printf '### %s\n' "$file"
+    fi
   fi
   tr -d '\0' < "$file"
   printf '\n\n'
@@ -554,14 +559,26 @@ run_find() {
   _init_git_ignored "$dir"
   _build_find_args "$dir" "$type"
 
+  if $SHOW_IGNORED; then
+    local excl d
+    excl=$(_get_exclude_dirs "$type")
+    set -f
+    for d in $excl; do
+      [[ -d "$dir/$d" ]] \
+        && printf 'SKIP [dir-prune]: %s/\n' "$d" >&2
+    done
+    set +f
+  fi
+
   local tmp; tmp=$(mktemp)
   if $RANDOM_ORDER \
      && command -v shuf >/dev/null 2>&1; then
     find "${_FIND_ARGS[@]}" 2>/dev/null \
       | shuf -z > "$tmp" || true
   else
+    # Deterministic lexicographic order
     find "${_FIND_ARGS[@]}" 2>/dev/null \
-      > "$tmp" || true
+      | sort -z > "$tmp" || true
   fi
 
   _BUDGET_BYTES=0 _BUDGET_WORDS=0
@@ -681,7 +698,8 @@ Options:
   -T, --no-tree        Skip directory tree
   -t, --trace          Show skipped files on stderr
   -c, --config FILE    Config (default: nearest .ktxrc)
-  --raw                No header, no AGENTS.md
+  --raw                No header, no AGENTS.md, no tree
+  --no-header          No ### file headers (implies --no-tree)
   --no-clip            Skip clipboard
   -v, --version        Show version
   -h, --help           Show help
@@ -723,14 +741,20 @@ main() {
           OUT_FILE=$2; shift
         fi ;;
       -l|--limit)
-        MAX_TOKENS=${2:?-l requires N}; shift ;;
+        MAX_TOKENS=${2:?-l requires N}
+        [[ $MAX_TOKENS =~ ^[0-9]+$ ]] || {
+          echo "Error: --limit requires a numeric value" >&2
+          exit 1
+        }
+        shift ;;
       -r|--random*)  RANDOM_ORDER=true ;;
       -T|--no-tree)  USE_TREE=false ;;
       -t|--trace)    SHOW_IGNORED=true ;;
       -c|--config)
         CONFIG_FILE=${2:?-c requires FILE}
         shift ;;
-      --raw)         RAW_MODE=true ;;
+      --no-header)   NO_HEADER=true ;;
+      --raw)         RAW_MODE=true; USE_TREE=false ;;
       --no-clip)     no_clip=true ;;
       --)            shift; break ;;
       --*)
@@ -758,14 +782,7 @@ main() {
       elif [[ -d $a ]]; then
         dir=$a
       else
-        # Try embedded dir.type split
-        local ext=${a##*.} pfx=${a%.*}
-        if [[ $ext != "$a" && -n $pfx \
-           && -d ${pfx:-.} ]]; then
-          dir=${pfx:-.}; type=$ext
-        else
-          dir=$a
-        fi
+        dir=$a
       fi ;;
     *)
       dir=${positional[0]}
@@ -778,6 +795,7 @@ main() {
     echo "Directory '$dir' not found" >&2
     exit 1
   }
+  dir=${dir%/}
 
   # ── Load config ─────────────────────────────────
   local rc=""
@@ -805,7 +823,8 @@ main() {
   if [[ ${CUSTOM_TYPE_FILES[$type]+_} ]]; then
     is_filelist=true
   elif [[ ! ${INCLUDE_PATTERNS[$type]+_} ]]; then
-    echo "Unknown type '.$type'" >&2; exit 1
+    echo "Type '.$type' has no include patterns or files" >&2
+    exit 1
   fi
 
   if ! $is_filelist \

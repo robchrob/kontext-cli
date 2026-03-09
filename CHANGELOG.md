@@ -1,6 +1,25 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## [0.7.8]
+
+### Added
+- **`--no-header` flag**: Suppresses `### filename` headers in output (useful for cleaner piping)
+- **Deterministic output order**: Files are now sorted lexicographically by default (use `-r/--randomize` for random order)
+- **`--trace` dir-prune visibility**: Shows pruned directories (e.g., `.git/`) in trace output
+- **Shellcheck directive**: Added `# shellcheck disable=SC2086` for intentional word-splitting
+- **New global blocklist entries**: `*.whl`, `*.egg`, `*.tar`, `.terraform`, `*.tfstate.backup`
+- **README improvements**: Prerequisites section, platform support table, one-liner `.ktxrc` examples
+
+### Changed
+- **`--raw` now implies `--no-tree`**: Raw mode is truly pipe-friendly
+- **`--limit` validation**: Rejects non-numeric values with clear error message
+- **Better error messages**: Empty `.ktxrc` type sections now say "has no include patterns or files"
+- **Directory handling**: Strips trailing slash from directory paths
+
+### Removed
+- **Surprising `src.py` splitting**: Removed the heuristic that tried to split `dir.ext` into directory + type
+
 ## [0.7.7]
 ### Fixed
 - **Token total calculation**: Fixed arithmetic expansion bug where `EXT_TOK[ext]` was treated as a literal string index instead of `$ext` variable expansion, causing `total_toks` to always be 0
