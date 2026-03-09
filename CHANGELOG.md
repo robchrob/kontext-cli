@@ -1,6 +1,26 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## [0.8.1]
+
+### Fixed
+- **Modifier +/- semantics for directories**: `+dirname` now correctly un-excludes a directory (removes from prune list), `-dirname` excludes a directory (adds to prune list). Previously `+` always force-included files and only `-` handled directories.
+- **Modifier +/- with globs**: `+glob` adds to include patterns AND force-includes; `-glob` removes from include patterns. Previous logic was inconsistent.
+
+### Changed
+- **Help text updated**: Modifier documentation now clearly shows directory vs file behavior and glob vs plain-name distinction
+
+## [0.8.0]
+
+### Changed
+- **Major code refactor**: Reduced ktx from 989 to ~516 lines (48% reduction)
+- **Simplified declarations**: Combined multi-line statements into compact form
+- **Removed trace helper functions**: `_trace_skip`, `_trace_accept`, `_trace_config` eliminated
+- **Simplified trace output**: Streamlined to essential config info only
+
+### Fixed
+- **Modifier logic consolidated**: Cleaner apply_mods() implementation
+
 ## [0.7.9]
 
 ### Changed

@@ -1,21 +1,22 @@
 # ktx
-Codebase → LLM context. Single bash file, zero deps.
+CLI util for 'Codebase → Context' ingest. Single bash file, zero deps.
 
 ```bash
-ktx                                   # filtered as config/cli defaults → clipboard
-ktx .py                               # Python preset → clipboard
-ktx src/ .js                          # JS/TS files in src/ dir
-ktx .py -r -l 50000                   # random sample within <50k token size
+ktx                                   # all files (filtered by defaults) → clipboard
+ktx .py                               # Python files + configs → clipboard
+ktx src/ .js                          # JS/TS files under src/
+ktx .py -r -l 50000                   # random sample, stay under 50k tokens
 ktx .py +'*.sql,Makefile' -'*.md'     # add SQL+Makefile, drop markdown
 ktx .py -o ctx.txt                    # save to file + clipboard
-ktx --raw -o                          # stdout only + raw (pipe-friendly)
+ktx --raw -o                          # stdout only, no headers (pipe-friendly)
+ktx .py -t                            # show what's skipped on stderr
+ktx .py +'dist'                       # un-exclude dist/ (normally pruned)
+ktx .py -'build'                      # exclude build/ directory
 
 # Quick custom type on the fly
-echo -e '[type:go]\ninclude=*.go go.mod go.sum Makefile' > .ktxrc
+echo -e '[type:go]\ninclude=*.go Makefile' > .ktxrc
 ktx .go
 ```
-#TODO examples are lacking, comments are not that good, we are not showcasing it enough
-but there are good moments too
 
 ## Install
 ```bash
@@ -23,9 +24,24 @@ curl -fsSL https://raw.githubusercontent.com/rcdev/kontext-cli/main/ktx \
   -o ~/.local/bin/ktx && chmod +x ~/.local/bin/ktx
 ```
 
+## Output
+```
+cd ~/python_proj && ktx .py
+```
+
+```
+Extension      | Files | Tokens
+---------------|-------|-------
+.py            |    42 | 11,203
+.toml          |     2 |    384
+Context for: type: py, files: 44, tokens: 12,434
+```
+Content (in clipboard): instruction header → `## Context` heading → directory tree → `AGENTS.md` → files (ordered or `--randomize`), with `### path` (disable with `--no-header`).
+`AGENTS.md` from target dir will be auto-included in context (disable with `--raw`).
+
 ## Options
 ```
-ktx [options] [modifiers] [dir] [.type]
+ktx [options] [modifiers...] [dir] [.type]
 ```
 
 | Flag | Description |
@@ -48,7 +64,7 @@ Custom types via [`.ktxrc`](#ktxrc).
 
 All types auto-exclude `.git .svn .hg .idea .vscode .vs` and a [global file blocklist](#default-exclusions).
 
-Additional built-ins (think C++ `.cpp` or Rust `.rs`) and defaults (new filename/dir to ignore) can be added, and are welcome through PRs[#TODO link to CONTRIBUTION section at the end].
+Additional built-ins (think C++ `.cpp` or Rust `.rs`) and defaults (new filename/dir to ignore) can be added, and are welcome through PRs — see [Contributing](#contributing).
 
 ## Modifiers
 `+` includes, `-` excludes. The token after the prefix determines what gets modified:
@@ -57,9 +73,9 @@ Additional built-ins (think C++ `.cpp` or Rust `.rs`) and defaults (new filename
 |----------|-----------|--------|
 | `+'*.sql'` | Glob (`*`) | Include `.sql` files |
 | `-'*.md'` | Glob (`*`) | Stop including `.md` files |
-| `-'dist'` | Plain name | Stop skipping `dist/` directory |
-| `+'.env'` | Plain name | Force-include `.env` (overrides global blocklist) |
-| `+'Makefile'` | Known include | Include `Makefile` in results |
+| `-'build'` | Plain name | Exclude `build/` directory |
+| `+'dist'` | Plain name | Un-exclude `dist/` directory (overrides type prune list) |
+| `+'.env'` | Known include | Force-include `.env` (overrides global blocklist) |
 
 **Glob characters**: `*` matches any string, `?` matches one character, `[abc]` matches character classes. These are standard shell glob patterns used in `case` matching against filenames.
 
@@ -163,25 +179,19 @@ See `.ktxrc.example` for Go, Rust, C/C++, Java presets, pattern composition, and
 |----------|--------|-------|
 | Linux | ✅ Supported | All features work |
 | macOS | ✅ Supported | Requires Bash 4+ via Homebrew |
-| WSL (Windows) | ✅ Supported | Uses Microslop clipboard via `clip.exe` |
+| WSL (Windows) | ✅ Supported | Uses clipboard via `clip.exe` |
 | FreeBSD | ⚠️ Experimental | May need GNU coreutils |
 
-## Output
-```
-Extension      | Files | Tokens
----------------|-------|-------
-.py            |    42 | 11,203
-.toml          |     2 |    384
-Context for '.' (type: py) → clipboard (~12,434 tokens)
-```
-Content structure: instruction header → `## Context` heading → directory tree → `AGENTS.md` → files (`### path`).
+## Contributing
+Contributions are welcome! Areas where work can be done:
+- **New built-in types** — C++ (`.cpp`), Rust (`.rs`), etc... We want to keep it robust, but standard.
+- **Default exclusions** — new filenames or directories that should be ignored globally, might missed something obvious
+- **Bug fixes and edge cases** — all rough edges, bugs and cross-platform issues
 
-`AGENTS.md` in target dir auto-included as system prompt (disable with `--raw`).
-
-Token estimate: $\text{bytes} \times 100/680 + \text{words} \times 65/100$
-
-#TODO CONTRIBUTION
+To contribute:
+1. Make your changes to `ktx` (please adhere to general project standard)
+2. Run `./test_ktx.sh` to verify nothing breaks - ADJUST OR ADD TEST CASES when neccessary! (`test_ktx.sh`)
+3. Open a PR with a clear description of what changed and why, acceptance of PR is absolutely, obviously, never guaranteed.
 
 ## License
 MIT
-
