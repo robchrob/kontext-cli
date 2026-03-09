@@ -1,8 +1,19 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
-## [0.8.1]
+## [0.8.2]
+### Added
+- **Granular output control**: Added flags to disable specific output sections individually:
+  - `--no-agents` skips `AGENTS.md` inclusion
+  - `--no-header` skips `### filename` per-file headers
+  - `--no-instr` skips the instruction header
+  - `--no-context` skips the `## Context for` heading
+  - `-T, --no-tree` already existed but is now part of this granular system
 
+### Changed
+- **`--raw` behavior aggregated**: `--raw` is now a true aggregate flag that simply sets `--no-tree`, `--no-agents`, `--no-header`, `--no-instr`, and `--no-context` internally, making it perfectly clean for piping.
+
+## [0.8.1]
 ### Fixed
 - **Modifier +/- semantics for directories**: `+dirname` now correctly un-excludes a directory (removes from prune list), `-dirname` excludes a directory (adds to prune list). Previously `+` always force-included files and only `-` handled directories.
 - **Modifier +/- with globs**: `+glob` adds to include patterns AND force-includes; `-glob` removes from include patterns. Previous logic was inconsistent.
@@ -11,7 +22,6 @@ All notable changes to this project will be documented in this file.
 - **Help text updated**: Modifier documentation now clearly shows directory vs file behavior and glob vs plain-name distinction
 
 ## [0.8.0]
-
 ### Changed
 - **Major code refactor**: Reduced ktx from 989 to ~516 lines (48% reduction)
 - **Simplified declarations**: Combined multi-line statements into compact form
@@ -22,7 +32,6 @@ All notable changes to this project will be documented in this file.
 - **Modifier logic consolidated**: Cleaner apply_mods() implementation
 
 ## [0.7.9]
-
 ### Changed
 - **Trace system completely overhauled** (Good feedback - previous implementation too verbose)
   - `-t` now shows compact config + skip reasons
@@ -40,7 +49,6 @@ All notable changes to this project will be documented in this file.
 - **SHOW_IGNORED variable** - replaced by TRACE_LEVEL
 
 ## [0.7.8]
-
 ### Added
 - **`--no-header` flag**: Suppresses `### filename` headers in output (useful for cleaner piping)
 - **Deterministic output order**: Files are now sorted lexicographically by default (use `-r/--randomize` for random order)
