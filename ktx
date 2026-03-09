@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
-VERSION="0.8.0"
+VERSION="0.8.1"
 
 declare -A EXCLUDE_DIRS=(
   [default]='.git .svn .hg .idea .vscode .vs'
-  [js]='node_modules .next .nuxt .turbo bower_components dist build out coverage .nyc_output'
-  [py]='__pycache__ .venv venv .mypy_cache .pytest_cache .ruff_cache .tox *.egg-info htmlcov dist build'
+  [js]='node_modules .next .nuxt .turbo bower_components dist build out coverage'
+  [py]='__pycache__ .venv venv .pytest_cache .ruff_cache *.egg-info dist build'
 )
 declare -A INCLUDE_PATTERNS=(
   [default]='*'
-  [js]='*.js *.ts *.jsx *.tsx *.mjs *.cjs *.json *.html *.css *.scss *.svelte *.vue *.md'
-  [py]='*.py *.pyw *.pyi *.toml *.cfg *.ini *.json *.yml *.yaml *.md *.txt *.rst *.j2 Makefile Dockerfile'
+  [js]='*.js *.ts *.jsx *.tsx *.mjs *.cjs *.json *.html *.css *.md'
+  [py]='*.py *.pyw *.pyi *.toml *.json *.yml *.yaml *.md *.j2'
 )
 _GBL_EXCL=(
   .DS_Store Thumbs.db desktop.ini
@@ -139,19 +139,39 @@ _trace_config() {
 
 # ── Modifiers ─────────────────────────────────────────
 apply_mods() {
-  local type=$1; shift; local m body part token
+  local type=$1; shift; local m body part token is_file p
   for m in "$@"; do
     body=${m:1}; IFS=',' read -r -a parts <<< "$body"
     for part in "${parts[@]}"; do
       token="${part#"${part%%[![:space:]]*}"}"; token="${token%"${token##*[![:space:]]}"}"
       [[ -z $token ]] && continue
-      if [[ ${m:0:1} == '+' ]]; then
-        FORCE_INCLUDE+=("$token")
-        INCLUDE_PATTERNS[$type]=$(_add_word "${INCLUDE_PATTERNS[$type]-}" "$token")
-      elif _is_glob "$token" || _is_known_include "$token"; then
-        INCLUDE_PATTERNS[$type]=$(_remove_word "${INCLUDE_PATTERNS[$type]-}" "$token")
+
+      is_file=false
+      if _is_glob "$token" || _is_known_include "$token"; then
+        is_file=true
       else
-        EXCLUDE_DIRS[$type]=$(_remove_word "${EXCLUDE_DIRS[$type]-}" "$token")
+        for p in "${_GBL_EXCL[@]}"; do
+          case "$token" in $p) is_file=true; break ;; esac
+        done
+      fi
+
+      if [[ ${m:0:1} == '+' ]]; then
+        if $is_file; then
+          # +glob or +known-include or globally-excluded: add to include patterns & force-include
+          FORCE_INCLUDE+=("$token")
+          INCLUDE_PATTERNS[$type]=$(_add_word "${INCLUDE_PATTERNS[$type]-}" "$token")
+        else
+          # +plain-name: un-exclude a directory (remove from prune list)
+          EXCLUDE_DIRS[$type]=$(_remove_word "${EXCLUDE_DIRS[$type]-}" "$token")
+        fi
+      else
+        if $is_file; then
+          # -glob or -known-include or globally-excluded: remove from include patterns
+          INCLUDE_PATTERNS[$type]=$(_remove_word "${INCLUDE_PATTERNS[$type]-}" "$token")
+        else
+          # -plain-name: exclude a directory (add to prune list)
+          EXCLUDE_DIRS[$type]=$(_add_word "${EXCLUDE_DIRS[$type]-}" "$token")
+        fi
       fi
     done
   done
@@ -409,8 +429,9 @@ Options:
   -c FILE        Config file (default: .ktxrc)
 
 Modifiers: +ITEM includes, -ITEM excludes (comma-separated).
-  +'*.sql'  include SQL    -'*.md'  drop markdown
-  -dist     unsuppress dir +.env   force-include (overrides blocklist)
+  +'*.sql'  include SQL files     -'*.md'   drop markdown files
+  +'dist'   un-exclude dist/ dir  -'build'  exclude build/ dir
+  +'.env'   force-include .env (overrides global blocklist)
 
 Types: .default .js .py (built-in). Custom types via .ktxrc.
   ktx .py                ktx src/ .js +'*.sql' -l 50000
