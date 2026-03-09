@@ -1,17 +1,26 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## [0.8.3]
+### Changed
+- **Reverted dynamic heading customization**: Removed `context-heading`, `tree-heading`, and `file-header` from `.ktxrc` configurations to simplify the scope.
+- **Streamlined output toggles**: Dropped granular CLI flags (`--no-header`, `--no-instr`, `--no-context-heading`). Disabling these headings is now exclusively handled by the `--raw` flag, which provides a clean, text-only output pipe.
+- **Usage menu formatting**: Reorganized the CLI help text into a cleaner, single-column layout for improved readability.
+- `instruction-header` and `agents-file` remain fully customizable via `.ktxrc`, and `--no-agents` is retained.
+
 ## [0.8.2]
 ### Added
 - **Granular output control**: Added flags to disable specific output sections individually:
   - `--no-agents` skips `AGENTS.md` inclusion
   - `--no-header` skips `### filename` per-file headers
   - `--no-instr` skips the instruction header
-  - `--no-context` skips the `## Context for` heading
+  - `--no-context-heading` skips the `## Context for` heading
   - `-T, --no-tree` already existed but is now part of this granular system
+- **Config toggles for output sections**: All the above `--no-*` flags can now be set in `.ktxrc` directly (e.g., `no-agents=true`).
 
 ### Changed
-- **`--raw` behavior aggregated**: `--raw` is now a true aggregate flag that simply sets `--no-tree`, `--no-agents`, `--no-header`, `--no-instr`, and `--no-context` internally, making it perfectly clean for piping.
+- **`--raw` behavior aggregated**: `--raw` is now a true aggregate flag that simply sets `--no-tree`, `--no-agents`, `--no-header`, `--no-instr`, and `--no-context-heading` internally, making it perfectly clean for piping.
+- **Default agent header synced**: The default instruction header is now explicitly documented and mirrored in `.ktxrc.example`.
 
 ## [0.8.1]
 ### Fixed
