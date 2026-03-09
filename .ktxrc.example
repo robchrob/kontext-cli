@@ -1,13 +1,13 @@
 # .ktxrc — ktx configuration
 # vim:set et ft=toml sw=4 ts=4:
-# ktx searches upward from target directory for .ktxrc
-# Override with: ktx -c path/to/config
+# ktx by default searches upward from target directory for .ktxrc
+# Override with: ktx -c path/to/.ktxrc.custom
 
 # ── Global settings ───────────────────────────────
 # Default type when .type not specified on CLI
-type=py
+type=api
 
-# Token budget (0 = unlimited)
+# Token budget (skip / 0 = unlimited)
 limit=100000
 
 # Custom instruction header (empty string disables it)
@@ -27,15 +27,15 @@ include=*.md *.rst *.txt *.adoc
 exclude=build _build site
 
 [type:go]
-include=*.go *.mod *.sum *.json *.yml *.yaml *.md *.toml Makefile Dockerfile
+include=*.go *.mod *.sum *.json *.yml *.yaml *.md *.toml
 exclude=vendor dist build
 
 [type:rs]
-include=*.rs *.toml *.json *.yml *.yaml *.md Makefile Dockerfile
+include=*.rs *.toml *.json *.yml *.yaml *.md
 exclude=target dist build
 
 [type:c]
-include=*.c *.h *.cpp *.hpp *.cc *.cxx *.cmake *.json *.yaml *.md Makefile CMakeLists.txt
+include=*.c *.h *.cpp *.hpp *.cc *.cxx *.cmake *.json *.yaml *.md
 exclude=build .cache out
 
 [type:java]

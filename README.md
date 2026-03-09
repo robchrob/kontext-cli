@@ -56,7 +56,7 @@ Options and arguments can be freely intermixed:
 | `-T, --no-tree` | Skip directory tree |
 | `-t, --trace` | Show skipped files on stderr |
 | `-c, --config FILE` | Config file (default: nearest `.ktxrc`) |
-| `--raw` | No header, no AGENTS.md, no tree (pipe-friendly) |
+| `--raw` | Minimal output: no headers, no AGENTS.md, no tree (pipe-friendly) |
 | `--no-header` | Suppress `### filename` headers |
 | `--no-clip` | Skip clipboard |
 | `-v, --version` | Show version |
