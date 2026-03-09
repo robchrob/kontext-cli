@@ -10,8 +10,13 @@ type=api
 # Token budget (skip / 0 = unlimited)
 limit=100000
 
-# Custom instruction header (empty string disables it)
-agent-header=Focus on security and error handling.
+# ── Output customization ──────────────────────────
+# Set strings to empty to disable them from printing
+instruction-header=Output full name + extension on the line before each code block.
+context-heading=## Context for %s
+tree-heading=### Directory Tree
+file-header=### %s
+agents-file=AGENTS.md
 
 # ── Modifiers (applied to the active type) ────────
 # +ITEM includes files matching glob/name
