@@ -1,6 +1,24 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## [0.7.9]
+
+### Changed
+- **Trace system completely overhauled** (Good feedback - previous implementation too verbose)
+  - `-t` now shows compact config + skip reasons
+  - `-tt` adds accepted file logging with token counts
+  - Removed `_trace_header`, `_trace_kv`, `_trace_list`, `_trace_diff_words`, `_trace_summary` functions
+  - Removed `_snapshot_defaults`, `_ORIG_INCLUDE`, `_ORIG_EXCLUDE` - no more diff markers
+  - Single `_trace_config` function prints one compact block
+  - Exclude dirs shown on single line
+  - Agent header shows `(default)` or truncated custom preview
+  - Fixed leading blank line bug (no more `\n` before first section)
+
+### Removed
+- **Filtering summary** - `show_stats` table + final summary line already provides accepted/token counts
+- **Version line in trace** - use `ktx -v` instead
+- **SHOW_IGNORED variable** - replaced by TRACE_LEVEL
+
 ## [0.7.8]
 
 ### Added
