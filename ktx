@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-VERSION="0.3.0"
+VERSION="0.3.1"
 
 declare -A EXCLUDE_DIRS=(
   [default]='.git .svn .hg .idea .vscode .vs'
@@ -13,7 +13,7 @@ declare -A INCLUDE_PATTERNS=(
   [py]='*.py *.pyw *.pyi *.toml *.json *.yml *.yaml *.md *.j2'
 )
 _GBL_EXCL=(
-  .DS_Store Thumbs.db desktop.ini
+  AGENTS.md .ktxrc .DS_Store Thumbs.db desktop.ini
   .env '.env.*' .envrc '*.pem' '*.key' '*.p12' '*.pfx' .npmrc .netrc
   'id_rsa*' 'id_ed*' '*.secret' '*.credentials' '*.tfvars' '*.tfstate'
   '*.pyc' '*.pyo' '*.so' '*.dylib' '*.dll' '*.o' '*.a' '*.obj' '*.class' '*.jar' '*.exe' '*.bin'
@@ -23,7 +23,7 @@ _GBL_EXCL=(
   '*.zip' '*.gz' '*.tgz' '*.rar' '*.7z' '*.bz2' '*.xz'
   '*.lock' package-lock.json pnpm-lock.yaml '*.min.js' '*.min.css' '*.map'
   '*.db' '*.sqlite' '*.sqlite3' '*.log' '*.pid' '*.out'
-  LICENSE CHANGELOG compile_commands.json .ktxrc .ctxrc
+  LICENSE compile_commands.json
 )
 
 declare -a FORCE_INCLUDE=() RC_MODS=()
@@ -31,15 +31,12 @@ declare -A EXT_CNT=() EXT_TOK=()
 declare -A CUSTOM_TYPE_INCLUDE=() CUSTOM_TYPE_EXCLUDE=()
 declare -A CUSTOM_TYPE_FILES=() CUSTOM_TYPE_WITH=() CUSTOM_TYPES=()
 MAX_TOKENS=0 RANDOM_ORDER=false RAW_MODE=false
-USE_TREE=true USE_AGENTS=true USE_FILE_HEADERS=true USE_INSTR=true USE_CONTEXT=true
+USE_TREE=true USE_AGENTS=true
 OUT_FILE='' OUT_TO_FILE=false CONFIG_FILE=''
 FILE_COUNT=0 SKIP_COUNT=0 RC_DIR='' _TYPE_FROM_RC=''
 
 INSTR_HEADER='State full filename + extension on the line before each code block.'
-CONTEXT_HEADING='## Context for %s'
-TREE_HEADING='### Directory Tree'
 AGENTS_FILE='AGENTS.md'
-FILE_HEADER='### %s'
 
 _BUDGET_BYTES=0 _BUDGET_WORDS=0 TRACE_LEVEL=0
 declare -A _GITIGNORED=()
@@ -121,11 +118,8 @@ _trace_config() {
   $RAW_MODE && flags+="raw "
   ! $USE_TREE && ! $RAW_MODE && flags+="no-tree "
   ! $USE_AGENTS && ! $RAW_MODE && flags+="no-agents "
-  ! $USE_FILE_HEADERS && ! $RAW_MODE && flags+="no-header "
-  ! $USE_INSTR && ! $RAW_MODE && flags+="no-instr "
-  ! $USE_CONTEXT && ! $RAW_MODE && flags+="no-context "
   local hdr="(disabled)"
-  if $USE_INSTR && [[ -n $INSTR_HEADER ]]; then
+  if ! $RAW_MODE && [[ -n $INSTR_HEADER ]]; then
     hdr="$INSTR_HEADER"; (( ${#hdr} > 50 )) && hdr="${hdr:0:47}..."
   fi
   local gi="no"
@@ -193,7 +187,6 @@ find_ktxrc() {
   local dir; dir=$(cd "$1" >/dev/null 2>&1 && pwd)
   while true; do
     [[ -f "$dir/.ktxrc" ]] && { echo "$dir/.ktxrc"; return 0; }
-    [[ -f "$dir/.ctxrc" ]] && { echo "$dir/.ctxrc"; return 0; }
     [[ $dir == "/" ]] && break; dir=$(dirname "$dir")
   done; return 1
 }
@@ -225,10 +218,9 @@ load_ktxrc() {
         limit=*)              MAX_TOKENS="${line#limit=}" ;;
         instruction-header=*) INSTR_HEADER="${line#instruction-header=}" ;;
         agent-header=*)       INSTR_HEADER="${line#agent-header=}" ;;
-        context-heading=*)    CONTEXT_HEADING="${line#context-heading=}" ;;
-        tree-heading=*)       TREE_HEADING="${line#tree-heading=}" ;;
         agents-file=*)        AGENTS_FILE="${line#agents-file=}" ;;
-        file-header=*)        FILE_HEADER="${line#file-header=}" ;;
+        no-tree=true)         USE_TREE=false ;;
+        no-agents=true)       USE_AGENTS=false ;;
         +*|-*)                RC_MODS+=("$line") ;;
       esac
     fi
@@ -315,11 +307,10 @@ _measure_and_emit() {
   EXT_CNT[$ext]=$(( ${EXT_CNT[$ext]:-0} + 1 )); EXT_TOK[$ext]=$(( ${EXT_TOK[$ext]:-0} + toks ))
   FILE_COUNT=$((FILE_COUNT + 1))
   _trace_accept "$file" "$toks"
-  if $USE_FILE_HEADERS && [[ -n $FILE_HEADER ]]; then
+  if ! $RAW_MODE; then
     local -a hdr; mapfile -n2 -t hdr < "$file" 2>/dev/null || true
     [[ ${hdr[0]:-} != *"$file"* && ${hdr[1]:-} != *"$file"* \
-    && ${hdr[0]:-} != *"$base"* && ${hdr[1]:-} != *"$base"* ]] && \
-      printf '%s\n' "${FILE_HEADER//%s/$file}"
+    && ${hdr[0]:-} != *"$base"* && ${hdr[1]:-} != *"$base"* ]] && printf '### %s\n' "$file"
   fi
   tr -d '\0' < "$file"; printf '\n\n'
 }
@@ -327,7 +318,7 @@ _measure_and_emit() {
 # ── Tree ──────────────────────────────────────────────
 run_tree() {
   local dir=$1 type=$2
-  [[ -n $TREE_HEADING ]] && printf '%s\n' "$TREE_HEADING"
+  ! $RAW_MODE && printf '### Directory Tree\n'
   if command -v tree-git-ignore >/dev/null 2>&1; then
     tree-git-ignore -a --noreport --prune "$dir" || true; printf '\n'; return
   fi
@@ -440,22 +431,28 @@ usage() { cat >&2 <<'EOF'
 Usage: ktx [options] [modifiers...] [dir] [.type]
 
 Options:
-  -o [FILE]  Output (no arg=stdout)       --raw                  Skip headers/tree/agents
-  -l N       Token limit                  -T, --no-tree          Skip directory tree
-  -r         Randomize file order         --no-agents            Skip agents file
-  -t         Trace (-t skip, -tt accept)  --no-header            Skip file headers
-  -c FILE    Config (default: .ktxrc)     --no-instr             Skip instruction header
-  --no-clip  Skip clipboard               --no-context-heading   Skip context heading
-  -v, --version  Version                  -h, --help             This help
+  -o, --output [FILE]   Write to file (no arg = stdout)
+  -l, --limit N         Token limit (default/empty = unlimited)
+  -r, --randomize       Randomize file order
+  -T, --no-tree         Skip directory tree
+  -t, --trace           Show skipped files on stderr (-tt for details)
+  -c, --config FILE     Config file (default: nearest .ktxrc)
+  --no-clip             Skip clipboard
+  --no-agents           Skip reading the agents file
+  --raw                 Skip headers, tree, and agents (pipe-friendly)
+  -v, --version         Show version
+  -h, --help            This help
 
 Modifiers: +ITEM includes, -ITEM excludes (comma-separated).
-  +'*.sql'  include SQL files     -'*.md'   drop markdown files
-  +'dist'   un-exclude dist/ dir  -'build'  exclude build/ dir
-  +'.env'   force-include .env (overrides global blocklist)
+  +'*.sql,dist'  include SQL files, un-exclude dist/ dir
+  -'*.md,build'  drop markdown files, exclude build/ dir
+  +'.env'        force-include .env (overrides global blocklist)
 
 Types: .default .js .py (built-in). Custom types via .ktxrc.
-  ktx .py                ktx src/ .js +'*.sql' -l 50000
-  ktx -t .py -o ctx.txt  ktx --raw -o
+  ktx .py
+  ktx src/ .js +'*.sql' -l 50000
+  ktx -t .py -o ctx.txt
+  ktx --raw -o
 EOF
 }
 
@@ -474,10 +471,7 @@ main() {
       -r|--random*) RANDOM_ORDER=true ;;
       -T|--no-tree) USE_TREE=false ;;
       --no-agents)  USE_AGENTS=false ;;
-      --no-header)  USE_FILE_HEADERS=false ;;
-      --no-instr)   USE_INSTR=false ;;
-      --no-context-heading) USE_CONTEXT=false ;;
-      --raw)        RAW_MODE=true; USE_TREE=false; USE_AGENTS=false; USE_FILE_HEADERS=false; USE_INSTR=false; USE_CONTEXT=false ;;
+      --raw)        RAW_MODE=true; USE_TREE=false; USE_AGENTS=false ;;
       -tt)          TRACE_LEVEL=2 ;;
       -t|--trace)   TRACE_LEVEL=$((TRACE_LEVEL + 1)) ;;
       -c|--config)  CONFIG_FILE=${2:?-c requires FILE}; shift ;;
@@ -526,15 +520,15 @@ main() {
   _trace_config "$type" "$full_path" "$rc"
 
   local tmp; tmp=$(mktemp)
-  if $USE_INSTR && [[ -n $INSTR_HEADER ]]; then
+  if ! $RAW_MODE && [[ -n $INSTR_HEADER ]]; then
     printf '%s\n\n' "$INSTR_HEADER" >> "$tmp"
   fi
-  if $USE_CONTEXT && [[ -n $CONTEXT_HEADING ]]; then
-    printf '%s\n\n' "${CONTEXT_HEADING//%s/$full_path}" >> "$tmp"
+  if ! $RAW_MODE; then
+    printf '## Context for %s\n\n' "$full_path" >> "$tmp"
   fi
   $USE_TREE && ! $is_filelist && run_tree "$dir" "$type" >> "$tmp"
   if $USE_AGENTS && [[ -n $AGENTS_FILE && -f "$dir/$AGENTS_FILE" ]]; then
-    printf '### System Prompt (from %s)\n' "$AGENTS_FILE" >> "$tmp"
+    ! $RAW_MODE && printf '### System Prompt (from %s)\n' "$AGENTS_FILE" >> "$tmp"
     cat "$dir/$AGENTS_FILE" >> "$tmp"
     printf '\n\n' >> "$tmp"
   fi

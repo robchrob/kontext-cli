@@ -8,7 +8,7 @@ ktx src/ .js                          # JS/TS files under src/
 ktx .py -r -l 50000                   # random sample, stay under 50k tokens
 ktx .py +'*.sql,Makefile' -'*.md'     # add SQL+Makefile, drop markdown
 ktx .py -o ctx.txt                    # save to file + clipboard
-ktx --raw -o                          # stdout only, no headers (pipe-friendly)
+ktx --raw -o                          # stdout only, skip all headers/tree/agents (pipe-friendly)
 ktx .py -t                            # show what's skipped on stderr
 ktx .py +'dist'                       # un-exclude dist/ (normally pruned)
 ktx .py -'build'                      # exclude build/ directory
@@ -36,8 +36,8 @@ Extension      | Files | Tokens
 .toml          |     2 |    384
 Context for: type: py, files: 44, tokens: 12,434
 ```
-Content (in clipboard): instruction header → `## Context` heading → directory tree → `AGENTS.md` → files (ordered or `--randomize`), with `### path` (disable with `--no-header`).
-`AGENTS.md` from target dir will be auto-included in context (disable with `--raw`).
+Content (in clipboard): instruction header → `## Context` heading → directory tree → `AGENTS.md` → files (ordered or `--randomize`), with `### path`.
+You can disable the agents file via `--no-agents`, the directory tree via `-T`, or strip all formatting (headers, headings, tree, and agents) at once with `--raw` (pipe-friendly).
 
 ## Options
 ```
@@ -50,10 +50,10 @@ ktx [options] [modifiers...] [dir] [.type]
 | `-l, --limit N` | Token limit (default/empty = unlimited) |
 | `-r, --randomize` | Randomize file order (default: sorted/deterministic) |
 | `-T, --no-tree` | Skip directory tree |
+| `--no-agents` | Skip reading the agents file |
+| `--raw` | Minimal output: skips headers, tree, and agents (pipe-friendly) |
 | `-t, --trace` / `-tt` | Show skipped files on stderr, `-tt` for details |
 | `-c, --config FILE` | Config file (default: nearest `.ktxrc` recursively up) |
-| `--raw` | Minimal output: no headers, no AGENTS.md, no tree (pipe-friendly) |
-| `--no-header` | Omit `### filename` headers |
 | `--no-clip` | Skip clipboard |
 | `-v, --version` | Show version |
 | `-h, --help` | Show help |
@@ -110,7 +110,13 @@ Force-include (`+pattern`) overrides layer 3.
 ```toml
 type=py                               # default type for this project
 limit=100000                          # token budget
-agent-header=Focus on error handling. # instruction header (empty = disable)
+
+# Output toggles
+instruction-header=State full filename... # (empty string disables)
+agents-file=AGENTS.md                 # (empty string disables)
+no-tree=true                          # skip directory tree
+no-agents=true                        # skip agents file inclusion
+
 +*.sql,Makefile                       # modifier: add to active type
 -*.md                                 # modifier: remove from active type
 ```
