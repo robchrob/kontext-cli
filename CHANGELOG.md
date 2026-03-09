@@ -1,11 +1,32 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## [0.8.4]
+### Added
+- **`--dry-run` / `-n` flag**: Shows tree + counts files/tokens without generating output or touching clipboard
+- **Expanded defaults**: `EXCLUDE_DIRS` and `INCLUDE_PATTERNS` now include entries from `DEFAULTS.md` — `.cache`, `.temp`, `jspm_packages`, `web_modules`, `.parcel-cache`, `.vite`, `.svelte-kit`, `.serverless`, `.firebase`, `.mypy_cache`, `.tox`, `.coverage`, `htmlcov`
+
+### Changed
+- **79-col line limit**: All lines reformatted to stay within 79 columns using continuation (`\`), multi-line strings, and restructured conditionals
+- **`no-agents` / `no-tree` removed from config**: `no-agents=true` and `no-tree=true` directives removed from `load_ktxrc`. Agents disabled via `agents-file=` (empty string). Tree control is CLI-only (`-T`)
+- **Version in usage**: `usage()` now uses `v${VERSION}` interpolated into the heredoc
+- **Inline custom type fix**: The type-not-found check now falls back to `CUSTOM_TYPE_INCLUDE[$type]` before erroring, so `ktx -c <(echo '[type:x]\ninclude=*.foo') .x` works
+- **Clipboard feedback**: Final summary line changed from `Context for: type: …` to `Copied N files (~X tokens) → clipboard`
+- **`DRY_RUN` in `_measure_and_emit`**: When dry-running, file stats are counted but content is not emitted
+
 ## [0.8.3]
+### Added
+- **Comprehensive test suite expansion**: Increased test coverage from 47 to 86 tests (83% increase)
+  - P0 (Critical): Exit code validation, `-o` without file behavior, `-T` CLI flag, `-c` explicit config
+  - P1 (High Priority): Unknown option handling, missing argument errors, `dir.type` combined args, stats on stderr, token budget with `--raw`, three-level `with=` chains, missing `AGENTS.md` handling
+  - P2 (Medium Priority): Double dash (`--`) parsing, deterministic sorting, `instruction-header` alias, `--no-clip`, modifiers on default type, file header smart detection, idempotent output, trace functionality
+  - P3 (Low Priority): Version/help flags, binary/media exclusions, NUL byte handling, Windows line endings in `.ktxrc`
+
 ### Changed
 - **Reverted dynamic heading customization**: Removed `context-heading`, `tree-heading`, and `file-header` from `.ktxrc` configurations to simplify the scope.
 - **Streamlined output toggles**: Dropped granular CLI flags (`--no-header`, `--no-instr`, `--no-context-heading`). Disabling these headings is now exclusively handled by the `--raw` flag, which provides a clean, text-only output pipe.
 - **Usage menu formatting**: Reorganized the CLI help text into a cleaner, single-column layout for improved readability.
+- **README updates**: Refreshed examples and documentation for clarity.
 - `instruction-header` and `agents-file` remain fully customizable via `.ktxrc`, and `--no-agents` is retained.
 
 ## [0.8.2]

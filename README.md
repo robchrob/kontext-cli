@@ -1,26 +1,25 @@
 # ktx
-CLI util for 'Codebase → Context' ingest. Single bash file, zero deps.
+CLI util for 'Codebase → Context in clipboard' ingest.
+Single bash file, zero deps.
 
 ```bash
-ktx                                   # all files (filtered by defaults) → clipboard
-ktx .py                               # Python files + configs → clipboard
-ktx src/ .js                          # JS/TS files under src/
-ktx .py -r -l 50000                   # random sample, stay under 50k tokens
-ktx .py +'*.sql,Makefile' -'*.md'     # add SQL+Makefile, drop markdown
-ktx .py -o ctx.txt                    # save to file + clipboard
-ktx --raw -o                          # stdout only, skip all headers/tree/agents (pipe-friendly)
-ktx .py -t                            # show what's skipped on stderr
-ktx .py +'dist'                       # un-exclude dist/ (normally pruned)
-ktx .py -'build'                      # exclude build/ directory
+ktx                               # all files → clipboard
+ktx .py                           # Python files + configs
+ktx src/ .js                      # JS/TS files under src/
+ktx .py -r -l 50000 --raw         # random sample, raw, limited
+ktx .py +'*.sql,Makefile' -'*.md' # add SQL+Makefile, drop md
+ktx .py --no-clip -o ctx.txt      # save to file, no clipboard
+ktx .py -n                        # dry run — tree + token estimate
+ktx .py -tt                       # detailed debug trace on stderr
 
-# Quick custom type on the fly
-echo -e '[type:go]\ninclude=*.go Makefile' > .ktxrc
-ktx .go
+# Custom type on the fly
+ktx -c <(echo -e '[type:go]\ninclude=*.go Makefile') .go
 ```
 
 ## Install
 ```bash
-curl -fsSL https://raw.githubusercontent.com/rcdev/kontext-cli/main/ktx \
+curl -fsSL \
+  https://raw.githubusercontent.com/robchrob/kontext-cli/master/ktx \
   -o ~/.local/bin/ktx && chmod +x ~/.local/bin/ktx
 ```
 
@@ -34,10 +33,13 @@ Extension      | Files | Tokens
 ---------------|-------|-------
 .py            |    42 | 11,203
 .toml          |     2 |    384
-Context for: type: py, files: 44, tokens: 12,434
+
+Copied 44 files (~12,434 tokens) → clipboard
 ```
-Content (in clipboard): instruction header → `## Context` heading → directory tree → `AGENTS.md` → files (ordered or `--randomize`), with `### path`.
-You can disable the agents file via `--no-agents`, the directory tree via `-T`, or strip all formatting (headers, headings, tree, and agents) at once with `--raw` (pipe-friendly).
+
+To control what's included in the output: disable the agents file
+with `--no-agents`, skip the directory tree with `-T`, or strip all
+formatting (headers, headings, tree, agents) at once with `--raw`.
 
 ## Options
 ```
@@ -47,93 +49,103 @@ ktx [options] [modifiers...] [dir] [.type]
 | Flag | Description |
 |------|-------------|
 | `-o, --output [FILE]` | Write to file (no arg = stdout) |
-| `-l, --limit N` | Token limit (default/empty = unlimited) |
-| `-r, --randomize` | Randomize file order (default: sorted/deterministic) |
+| `-l, --limit N` | Token limit (unlimited if unset) |
+| `-r, --randomize` | Randomize file order (default: sorted) |
+| `-n, --dry-run` | Show tree + token estimate, no output |
 | `-T, --no-tree` | Skip directory tree |
 | `--no-agents` | Skip reading the agents file |
-| `--raw` | Minimal output: skips headers, tree, and agents (pipe-friendly) |
-| `-t, --trace` / `-tt` | Show skipped files on stderr, `-tt` for details |
-| `-c, --config FILE` | Config file (default: nearest `.ktxrc` recursively up) |
+| `--raw` | No headers/tree/agents (pipe-friendly) |
+| `-t, --trace` / `-tt` | Skipped files on stderr, `-tt` verbose |
+| `-c, --config FILE` | Config file (default: `.ktxrc` up) |
 | `--no-clip` | Skip clipboard |
 | `-v, --version` | Show version |
 | `-h, --help` | Show help |
 
 ## Types
-Built-in: `.default` (all files), `.js`, `.py`.
+Built-in: `.default` (all files + default excludes),
+`.js`, `.py` (more coming soon™).
 Custom types via [`.ktxrc`](#ktxrc).
 
-All types auto-exclude `.git .svn .hg .idea .vscode .vs` and a [global file blocklist](#default-exclusions).
-
-Additional built-ins (think C++ `.cpp` or Rust `.rs`) and defaults (new filename/dir to ignore) can be added, and are welcome through PRs — see [Contributing](#contributing).
+Additional built-ins (think `.cpp`, `.rs`, `.go`) and default
+entries are welcome through PRs — see [Contributing](#contributing).
 
 ## Modifiers
-`+` includes, `-` excludes. The token after the prefix determines what gets modified:
+`+` includes, `-` excludes.
+Supports comma-separated lists: `+'*.sql,*.graphql'`.
+
+The token after the prefix determines what gets modified:
 
 | Modifier | Token type | Effect |
 |----------|-----------|--------|
 | `+'*.sql'` | Glob (`*`) | Include `.sql` files |
 | `-'*.md'` | Glob (`*`) | Stop including `.md` files |
 | `-'build'` | Plain name | Exclude `build/` directory |
-| `+'dist'` | Plain name | Un-exclude `dist/` directory (overrides type prune list) |
-| `+'.env'` | Known include | Force-include `.env` (overrides global blocklist) |
+| `+'dist'` | Plain name | Un-exclude `dist/` directory |
+| `+'.env'` | Known blocklist | Force-include `.env` |
 
-**Glob characters**: `*` matches any string, `?` matches one character, `[abc]` matches character classes. These are standard shell glob patterns used in `case` matching against filenames.
-
-Comma-separated: `+'*.sql,*.graphql'`. Precedence: built-in → `.ktxrc` → CLI modifiers.
+**Glob characters**:
+`*` matches any string, `?` matches one char,
+`[abc]` matches character classes.
+Standard shell glob patterns used in `case` matching.
 
 ## .ktxrc
-Project config. Place in project root or any parent — searched upward from target dir. Also reads `.ctxrc`. Override: `-c path`.
+Precedence: built-in → `.ktxrc` → CLI modifiers.
+`.ktxrc` in project root or any parent — searches upward from the target directory.
+Override: `-c path`.
 
-### Quick Start with Custom Types
-Create a custom type on the fly:
+### Quick Start
 ```bash
 # Create a Go type and use it immediately
-echo -e '[type:go]\ninclude=*.go go.mod go.sum Makefile' > .ktxrc
+echo -e '[type:go]\ninclude=*.go Makefile' > .ktxrc
 ktx .go
 ```
 
 Or use an inline config for one-off runs:
 ```bash
-ktx -c <(echo -e '[type:go]\ninclude=*.go go.mod') .go
+ktx -c <(echo -e '[type:custom]\ninclude=*.foobar') .custom
 ```
 
 ### Filtering layers
 Applied in order for every candidate file:
-1. **Dir pruning** — always-excluded (`.git`, …) + type's `exclude=` dirs → `find -prune`
+1. **Dir prune** — default excludes (`.git`, …) + type `exclude=` dir → `find -prune`
 2. **Include patterns** — only files matching the type's globs pass (default: `*`)
-3. **Global blocklist** — OS junk, secrets, binaries, media, lockfiles ([full list](#default-exclusions))
-4. **Gitignore** — `git ls-files -oi --exclude-standard`
+3. **Global blocklist** — OS junk, secrets, binaries, media, lockfiles
+4. **Gitignore** — (`git ls-files -oi --exclude-standard`) are skipped
 5. **Token budget** — stops at `-l N`
 Force-include (`+pattern`) overrides layer 3.
 
 ### Global directives
 ```toml
-type=py                               # default type for this project
-limit=100000                          # token budget
+type=py                        # default type
+limit=100000                   # token budget
 
-# Output toggles
-instruction-header=State full filename... # (empty string disables)
-agents-file=AGENTS.md                 # (empty string disables)
-no-tree=true                          # skip directory tree
-no-agents=true                        # skip agents file inclusion
+# Output toggles (empty string disables)
+instruction-header=Full code!  # custom header
+agents-file=AGENTS.md          # agents file path
+agents-file=                   # ← disables agents
 
-+*.sql,Makefile                       # modifier: add to active type
--*.md                                 # modifier: remove from active type
++*.sql,Makefile                # modifier: include
+-*.md                          # modifier: exclude
 ```
 
 ### Custom types — pattern-based
-File discovery by glob. `include=` selects files, `exclude=` prunes directories.
+File discovery by glob.
+`include=` selects files, `exclude=` prunes directories.
 ```toml
 [type:go]
-include=*.go *.mod *.sum *.json Makefile Dockerfile
+include=*.go *.json Makefile Dockerfile
 exclude=vendor dist build
+
+[type:docs]
+include=*.md
 ```
 
 ```bash
 ktx .go
 ```
-Pattern types support `with=` to compose other types. Include patterns and exclude dirs are merged from all dependencies:
 
+Pattern types support `with=` to compose other types.
+Include patterns and exclude dirs merge from all deps:
 ```toml
 [type:fullstack]
 with=js
@@ -142,62 +154,65 @@ exclude=__pycache__ .venv
 ```
 
 ```bash
-ktx .fullstack    # includes JS/TS patterns + Python patterns
+ktx .fullstack    # includes js type + fullstack
 ```
 
 ### Custom types — file lists
-Explicit paths for domain slicing. Relative to `.ktxrc` location.
+List explicit file paths (one per line):
 ```toml
 [type:api]
 with=infra
 src/api/routes.ts
 src/api/middleware.ts
+src/api/auth.ts
 
 [type:infra]
 src/db/schema.ts
-package.json
+src/db/index.ts
+tsconfig.json
 ```
 
 ```bash
-ktx .api      # collects infra files first, then api files
+ktx .api    # includes api + infra files
 ```
-`with=` composes types transitively (BFS, cycle-safe). Works for both file-list and pattern types.
 
 ### Type resolution
-- A type is **file-list** if it contains explicit paths, **pattern-based** otherwise. Cannot mix in one type.
-- `with=` merges dependencies: file-list types collect all files; pattern types merge include/exclude lists.
-- Resolution order: CLI type → `with=` deps (BFS) → built-in + `.ktxrc` + CLI modifiers → filtering layers; use `--trace` or `-tt` for even more detailed info about execution.
-
-See `.ktxrc.example` for Go, Rust, C/C++, Java presets, pattern composition, and file-list examples.
+- A type is **file-list** if it has explicit paths,
+  **pattern-based** if it uses `include=`. Cannot mix.
+- `with=` merges dependencies: file-list types collect all files;
+  pattern types merge include/exclude.
+- `with=` composes transitively (BFS, cycle-safe).
+- Resolution: CLI type → `with=` deps → built-in + `.ktxrc` + CLI mods → filtering.
+- Use `-t` / `-tt` for trace info about execution.
 
 ## Prerequisites
 - **Bash 4.0+**
-- **coreutils**: `find`, `wc`, `tr`, `sort`, `mktemp`, `sed` (standard on Linux/macOS)
-- **Optional**: `tree` or `tree-git-ignore` (for directory tree output)
+- **coreutils**: `find`, `wc`, `tr`, `sort`, `mktemp`, `sed`
+- **Optional**: `tree` or `tree-git-ignore` (dir tree)
 - **Clipboard** (optional, auto-detected):
-  - macOS: `pbcopy` (built-in)
-  - Linux/Wayland: `wl-copy` (`wl-clipboard`)
+  - macOS: `pbcopy`
+  - Linux/Wayland: `wl-copy`
   - Linux/X11: `xclip` or `xsel`
-  - WSL/Windows: `clip.exe` (built-in)
+  - WSL/Windows: `clip.exe`
 
 ## Platform Support
 | Platform | Status | Notes |
 |----------|--------|-------|
 | Linux | ✅ Supported | All features work |
-| macOS | ✅ Supported | Requires Bash 4+ via Homebrew |
-| WSL (Windows) | ✅ Supported | Uses clipboard via `clip.exe` |
+| macOS | ✅ Supported | Requires Bash 4+ (Homebrew) |
+| WSL | ✅ Supported | Clipboard via `clip.exe` |
 | FreeBSD | ⚠️ Experimental | May need GNU coreutils |
 
 ## Contributing
-Contributions are welcome! Areas where work can be done:
-- **New built-in types** — C++ (`.cpp`), Rust (`.rs`), etc... We want to keep it robust, but standard.
-- **Default exclusions** — new filenames or directories that should be ignored globally, might missed something obvious
-- **Bug fixes and edge cases** — all rough edges, bugs and cross-platform issues
+Contributions welcome! Areas of interest:
+- **New built-in types** — `.cpp`, `.rs`, `.go`, etc. Keep them robust and standard.
+- **Default exclusions** —  What should be globally ignored but are missing.
+- **Bug fixes and edge cases** — rough edges, cross-platform issues.
 
 To contribute:
-1. Make your changes to `ktx` (please adhere to general project standard)
-2. Run `./test_ktx.sh` to verify nothing breaks - ADJUST OR ADD TEST CASES when neccessary! (`test_ktx.sh`)
-3. Open a PR with a clear description of what changed and why, acceptance of PR is absolutely, obviously, never guaranteed.
+1. Edit `ktx` (follow the project style)
+2. Run `./test_ktx.sh` — update or add tests as needed
+3. Open a PR with a clear description
 
 ## License
 MIT
