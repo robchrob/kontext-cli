@@ -41,7 +41,7 @@ fmt_num() { case "$1" in ''|*[!0-9]*) printf '%s' "$1" ;;
 esac; }
 tok_est() { echo $(( ${1:-0}*100/680 + ${2:-0}*65/100 )); }
 _file_ext() { local b=$1; case "$b" in .*.*) _ext=".${b#*.}" ;;
-  *.*) _ext=".${b##*.}" ;; *) _ext="(no ext)" ;; esac; }
+  *.*) _ext=".${b##*.}" ;; *) _ext="$b" ;; esac; }
 
 _add_word() { set -f; local cur=$1 t=$2 w; for w in $cur; do
   [[ $w == "$t" ]] && { printf '%s' "$cur"; set +f; return; }; done
@@ -96,7 +96,7 @@ _trace_config() { (( TRACE_LEVEL >= 1 )) || return 0
     "limit:" "$lim" >&2
   [[ -n $fl ]] && printf '  %-12s %s\n' "flags:" "$fl" >&2
   printf '  %-12s %s\n' "include:" "$inc" "dir-prune:" \
-    "$(_get_exclude_dirs "$t")" "file-block:" "${#_GBL_EXCL[@]} patterns" >&2
+    "$(_get_exclude_dirs "$t")" >&2
   (( TRACE_LEVEL >= 2 )) && printf '  %s\n' "${_GBL_EXCL[*]}" >&2
   (( ${#FORCE_INCLUDE[@]} )) && \
     printf '  %-12s %s\n' "force:" "${FORCE_INCLUDE[*]}" >&2
