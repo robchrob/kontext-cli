@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 ## [0.8.4]
 ### Added
 - **`--dry-run` / `-n` flag**: Shows tree + counts files/tokens without generating output or touching clipboard
-- **Expanded defaults**: `EXCLUDE_DIRS` and `INCLUDE_PATTERNS` now include entries from `DEFAULTS.md` — `.cache`, `.temp`, `jspm_packages`, `web_modules`, `.parcel-cache`, `.vite`, `.svelte-kit`, `.serverless`, `.firebase`, `.mypy_cache`, `.tox`, `.coverage`, `htmlcov`
+- **Expanded defaults**: `EXCLUDE_DIRS` and `INCLUDE_PATTERNS` now include updated entries `.cache`, `.temp`, `jspm_packages`, `web_modules`, `.vite`, `.svelte-kit`,...
 
 ### Changed
 - **79-col line limit**: All lines reformatted to stay within 79 columns using continuation (`\`), multi-line strings, and restructured conditionals

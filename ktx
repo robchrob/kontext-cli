@@ -285,9 +285,13 @@ find_ktxrc() {
 }
 load_ktxrc() {
   local file=$1 section=""
-  [[ -f $file ]] || return 0
-  RC_DIR=$(cd "$(dirname "$file")" \
-    >/dev/null 2>&1 && pwd)
+  [[ -r $file ]] || return 0
+  if [[ $file == /dev/fd/* ]]; then
+    RC_DIR=""
+  else
+    RC_DIR=$(cd "$(dirname "$file")" \
+      >/dev/null 2>&1 && pwd)
+  fi
   while IFS= read -r line || [[ -n $line ]]; do
     line="${line%$'\r'}"; line=${line%%#*}
     line=${line#"${line%%[![:space:]]*}"}
@@ -662,7 +666,7 @@ Options:
   -c, --config FILE     Config file (default: .ktxrc up)
   -n, --dry-run         Show file tree + token estimate only
   --no-clip             Skip clipboard
-  --no-agents           Skip reading the agents file
+  --no-agents           Skip inclusion of AGENTS.md file
   --raw                 No headers/tree/agents (pipe-friendly)
   -v, --version         Show version
   -h, --help            This help
