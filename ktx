@@ -9,14 +9,12 @@ declare -A EXCLUDE_DIRS=(
     coverage .nyc_output'
   [py]='__pycache__ .venv venv .pytest_cache .mypy_cache .ruff_cache .tox build
     dist *.egg-info .coverage htmlcov')
-
 declare -A INCLUDE_PATTERNS=(
   [default]='*'
   [js]='*.js *.ts *.jsx *.tsx *.mjs *.cjs *.json *.html *.css *.md'
   [py]='*.py *.pyw *.pyi *.toml *.json *.yml *.yaml *.md *.j2')
-
 _GBL_EXCL=(
-  AGENTS.md LICENSE .ktxrc .DS_Store Thumbs.db desktop.ini .env* '.env.*'
+  AGENTS.md LICENSE CHANGELOG.md .ktxrc .gitignore .gitmodules .DS_Store Thumbs.db desktop.ini .env* '.env.*'
   '*.pem' '*.key' '*.p12' '*.pfx' .npmrc .netrc 'id_rsa*' 'id_ed*' '*.secret*'
   '*.cred*' '*.tfvars' '*.tfstate' '*.pyc' '*.pyo' '*.so' '*.dylib' '*.dll'
   '*.o' '*.a' '*.obj' '*.class' '*.jar' '*.exe' '*.bin' '*.png' '*.jpg' '*.jpeg'
@@ -33,24 +31,23 @@ declare -A CUSTOM_TYPES=()
 MAX_TOKENS=0 RANDOM_ORDER=false RAW_MODE=false USE_TREE=true USE_AGENTS=true
 DRY_RUN=false OUT_FILE='' OUT_TO_FILE=false CONFIG_FILE='' FILE_COUNT=0
 SKIP_COUNT=0 RC_DIR='' _TYPE_FROM_RC='' _BUDGET_BYTES=0 _BUDGET_WORDS=0
-TRACE_LEVEL=0 INSTR_HEADER='State full filename + extension on the line '
-INSTR_HEADER+='before each code block.' AGENTS_FILE='AGENTS.md'
+TRACE_LEVEL=0
+AGENTS_FILE='AGENTS.md'
+INSTR_HEADER='State full filename + extension on the line before each code block.'
 
 fmt_num() { case "$1" in ''|*[!0-9]*) printf '%s' "$1" ;;
   *) LC_NUMERIC=C numfmt --grouping "$1" 2>/dev/null || printf '%s' "$1" ;;
 esac; }
 tok_est() { echo $(( ${1:-0}*100/680 + ${2:-0}*65/100 )); }
+_is_glob() { [[ $1 == *[\*\?\[]* ]]; }
 _file_ext() { local b=$1; case "$b" in .*.*) _ext=".${b#*.}" ;;
   *.*) _ext=".${b##*.}" ;; *) _ext="$b" ;; esac; }
-
 _add_word() { set -f; local cur=$1 t=$2 w; for w in $cur; do
   [[ $w == "$t" ]] && { printf '%s' "$cur"; set +f; return; }; done
   printf '%s' "${cur:+$cur }$t"; set +f; }
-
 _remove_word() { set -f; local cur=$1 t=$2 out="" w; for w in $cur; do
   [[ $w != "$t" ]] && out+=" $w"; done
   printf '%s' "${out#"${out%%[! ]*}"}"; set +f; }
-
 _is_known_include() { local t p; for t in "${!INCLUDE_PATTERNS[@]}"; do set -f
     for p in ${INCLUDE_PATTERNS[$t]}; do
       [[ $p == "$1" ]] && { set +f; return 0; }; done; set +f; done
@@ -58,14 +55,10 @@ _is_known_include() { local t p; for t in "${!INCLUDE_PATTERNS[@]}"; do set -f
     for p in ${CUSTOM_TYPE_INCLUDE[$t]}; do
       [[ $p == "$1" ]] && { set +f; return 0; }; done; set +f; done
   return 1; }
-
-_is_glob() { [[ $1 == *[\*\?\[]* ]]; }
-
 _get_exclude_dirs() { local type=$1 w out=""; set -f
   for w in ${EXCLUDE_DIRS[default]}; do out="${out:+$out }$w"; done
   [[ $type != default ]] && for w in ${EXCLUDE_DIRS[$type]-}; do
     out="${out:+$out }$w"; done; set +f; printf '%s' "$out"; }
-
 is_globally_excluded() { local pat
   if (( ${#FORCE_INCLUDE[@]} )); then for pat in "${FORCE_INCLUDE[@]}"; do
     case "$1" in $pat) return 1 ;; esac; done; fi
@@ -78,7 +71,6 @@ _trace_skip() { SKIP_COUNT=$((SKIP_COUNT + 1))
   (( TRACE_LEVEL >= 1 )) && printf '  SKIP [%s] %s\n' "$1" "$2" >&2; return 0; }
 _trace_accept() { (( TRACE_LEVEL >= 2 )) && \
   printf '  ACCEPT %s (~%s tok)\n' "$1" "$(fmt_num "$2")" >&2; return 0; }
-
 _trace_config() { (( TRACE_LEVEL >= 1 )) || return 0
   local t=$1 d=$2 rc=$3 inc="" w lim=unlimited fl="" hdr="(disabled)" gi=no
   set -f; for w in ${INCLUDE_PATTERNS[$t]-*}; do inc="${inc:+$inc }$w"; done
@@ -135,7 +127,6 @@ apply_mods() { local type=$1; shift; local m body part token is_file p
 find_ktxrc() { local dir; dir=$(cd "$1" >/dev/null 2>&1 && pwd)
   while true; do [[ -f "$dir/.ktxrc" ]] && { echo "$dir/.ktxrc"; return 0; }
     [[ $dir == "/" ]] && break; dir=$(dirname "$dir"); done; return 1; }
-
 load_ktxrc() { local file=$1 section="" ct v
   [[ -r $file ]] || return 0
   [[ $file == /dev/fd/* ]] && RC_DIR="" || \
@@ -186,7 +177,6 @@ resolve_with() { local type=$1 cur wv dep i; local -a order=() queue=("$type")
       done; }
   done
   for (( i=${#order[@]}-1; i>=0; i-- )); do printf '%s\n' "${order[$i]}"; done; }
-
 _merge_pattern_type() { local type=$1 m_inc="" m_exc="" t w inc exc
   local -a all; mapfile -t all < <(resolve_with "$type")
   for t in "${all[@]}"; do inc=${INCLUDE_PATTERNS[$t]-}
@@ -211,7 +201,6 @@ _should_skip() { local file=$1 base=$2 dir=$3 rel
   if (( ${#_GITIGNORED[@]} )); then rel=${file#"$dir/"}
     [[ ${_GITIGNORED[$rel]+_} ]] && { _trace_skip "gitignore" "$file"; return 0;}
   fi; return 1; }
-
 _measure_and_emit() { local file=$1 base=${1##*/} sz wd est ext toks
   sz=$(($(wc -c < "$file"))); wd=$(($(wc -w < "$file")))
   _BUDGET_BYTES=$((_BUDGET_BYTES + sz)); _BUDGET_WORDS=$((_BUDGET_WORDS + wd))
@@ -251,13 +240,18 @@ _build_find_args() { local dir=$1 type=$2 excl d p pats first=1
     for d in $excl; do (( first )) || _FIND_ARGS+=(-o); first=0
       _FIND_ARGS+=(-name "$d"); done
     _FIND_ARGS+=( \) -type d -prune -o ); fi
-  _FIND_ARGS+=(-type f); pats=${INCLUDE_PATTERNS[$type]-*}
+  _FIND_ARGS+=(-type f)
+  # Also exclude files with excluded directory names (e.g., submodule .git files)
+  if [[ -n $excl ]]; then _FIND_ARGS+=( ! \( ); first=1
+    for d in $excl; do (( first )) || _FIND_ARGS+=(-o); first=0
+      _FIND_ARGS+=(-name "$d"); done
+    _FIND_ARGS+=( \) ); fi
+  pats=${INCLUDE_PATTERNS[$type]-*}
   if [[ -z $pats ]]; then _FIND_ARGS+=(-name '__no_match__')
   elif [[ $pats != '*' ]]; then _FIND_ARGS+=( \( ); first=1
     for p in $pats; do (( first )) || _FIND_ARGS+=(-o); first=0
       _FIND_ARGS+=(-name "$p"); done; _FIND_ARGS+=( \) ); fi
   set +f; _FIND_ARGS+=(-print0); }
-
 run_find() { local dir=$1 type=$2 excl d tmp file
   _init_git_ignored "$dir"
   if (( TRACE_LEVEL >= 1 )); then excl=$(_get_exclude_dirs "$type")
@@ -310,14 +304,12 @@ show_stats() { (( ${#EXT_TOK[@]} )) || return 0
   done | sort -t$'\t' -k3,3nr | while IFS=$'\t' read -r ext cnt raw; do
     printf '%-*s | %5d | %*s\n' "$w_ext" "$ext" "$cnt" "$w_tok" \
       "$(fmt_num "$raw")" >&2; done; }
-
 copy_to_clipboard() { local c
   for c in pbcopy wl-copy xclip xsel clip; do
     command -v "$c" >/dev/null 2>&1 || continue
     case $c in xclip) printf '%s' "$1" | xclip -sel clipboard ;;
       xsel) printf '%s' "$1" | xsel --clipboard --input ;;
       *) printf '%s' "$1" | "$c" ;; esac; return 0; done; return 1; }
-
 usage() { cat >&2 <<EOF
 kontext-cli (ktx) v${VERSION}
 Usage: ktx [options] [modifiers...] [dir] [.type]
@@ -328,8 +320,8 @@ Options:
   -r, --randomize      Randomize file order
   -n, --dry-run        Tree + token estimate only
   -T, --no-tree        Skip directory tree
-  -t, --trace          Skipped on stderr (-tt verbose)
-  -c, --config FILE    Config file (default: .ktxrc up)
+  -t/--trace, -tt      Skipped on stderr (-tt verbose)
+  -c, --config [FILE]  Config file (default: .ktxrc up)
   --no-clip            Skip clipboard
   --no-agents          Skip AGENTS.md inclusion
   --raw                No headers/tree/agents (piping)
