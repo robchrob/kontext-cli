@@ -195,14 +195,6 @@ ktx .api    # includes api + infra files
   - Linux/X11: `xclip` or `xsel`
   - WSL/Windows: `clip.exe`
 
-## Platform Support
-| Platform | Status | Notes |
-|----------|--------|-------|
-| Linux | ✅ Supported | All features work |
-| macOS | ✅ Supported | Requires Bash 4+ (Homebrew) |
-| WSL | ✅ Supported | Clipboard via `clip.exe` |
-| FreeBSD | ⚠️ Experimental | May need GNU coreutils |
-
 ## Contributing
 Contributions welcome! Areas of interest:
 - **New built-in types** — `.cpp`, `.rs`, `.go`, etc. Keep them robust and standard.
@@ -210,9 +202,11 @@ Contributions welcome! Areas of interest:
 - **Bug fixes and edge cases** — rough edges, cross-platform issues.
 
 To contribute:
-1. Edit `ktx` (follow the project style)
-2. Run `./test_ktx.sh` — update or add tests as needed
-3. Open a PR with a clear description
+1. Edit `ktx` / `README.md` / `CHANGELOG.md` (project style - max 79 line length)
+2. Open a PR with a clear description
+3. That's it, rest is on me.
+
+Cheers!
 
 ## License
 MIT
