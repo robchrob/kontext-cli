@@ -1,19 +1,19 @@
-# ktx
+# ktx (kontext-cli)
 CLI util for 'Codebase → Context in clipboard' ingest.
-Single bash file, zero deps.
+Single bash file, zero dependencies (aside of `coreutils` and clipboard app).
 
 ```bash
-ktx                               # all files → clipboard
-ktx .py                           # Python files + configs
-ktx src/ .js                      # JS/TS files under src/
-ktx .py -r -l 50000 --raw         # random sample, raw, limited
-ktx .py +'*.sql,Makefile' -'*.md' # add SQL+Makefile, drop md
-ktx .py --no-clip -o ctx.txt      # save to file, no clipboard
-ktx .py -n                        # dry run — tree + token estimate
-ktx .py -tt                       # detailed debug trace on stderr
+ktx                                     # all files → clipboard
+ktx .py                                 # Python files + configs
+ktx src/ .js                            # JS/TS files under src/
+ktx -r -l 50000 --raw .py               # random sample, raw, limited
+ktx +'*.sql,Makefile' -'*.md' .py       # add SQL+Makefile, drop md
+ktx --no-clip -o ctx.txt dir/ .js       # save to file, no clipboard, js filter
+ktx -n .py                              # dry run — tree + token estimate
+ktx -tt .py                             # detailed debug trace on stderr
 
-# Custom type on the fly
-ktx -c <(echo -e '[type:go]\ninclude=*.go Makefile') .go
+# Custom type on the fly via .ktxrc
+ktx -c <(echo -e '[type:custom]\ninclude=*.go Makefile') .custom
 ```
 
 ## Install
@@ -38,7 +38,7 @@ Copied 44 files (~12,434 tokens) → clipboard
 ```
 
 To control what's included in the output: disable the agents file
-with `--no-agents`, skip the directory tree with `-T`, or strip all
+with `--no-agents`, skip the directory tree in context with `-T`, or strip all
 formatting (headers, headings, tree, agents) at once with `--raw`.
 
 ## Options
@@ -56,7 +56,7 @@ ktx [options] [modifiers...] [dir] [.type]
 | `--no-agents` | Skip reading the agents file |
 | `--raw` | No headers/tree/agents (pipe-friendly) |
 | `-t, --trace` / `-tt` | Skipped files on stderr, `-tt` verbose |
-| `-c, --config FILE` | Config file (default: `.ktxrc` up) |
+| `-c, --config [FILE]` | Config file (default: `.ktxrc` up) |
 | `--no-clip` | Skip clipboard |
 | `-v, --version` | Show version |
 | `-h, --help` | Show help |
@@ -115,23 +115,22 @@ Applied in order for every candidate file:
 Force-include (`+pattern`) overrides layer 3.
 
 ### Global directives
-```toml
-type=py                        # default type
-limit=100000                   # token budget
+```ini
+type=py                                 # default type
+limit=100000                            # token budget
 
-# Output toggles (empty string disables)
-instruction-header=Full code!  # custom header
-agents-file=AGENTS.md          # agents file path
-agents-file=                   # ← disables agents
+# Output toggles 
+instruction-header=Custom instructions  # custom header (empty string disables)
+agents-file=AGENTS.md                   # agents file path (empty string disables)
 
-+*.sql,Makefile                # modifier: include
--*.md                          # modifier: exclude
++*.sql,Makefile                         # modifier: include
+-*.md                                   # modifier: exclude
 ```
 
 ### Custom types — pattern-based
 File discovery by glob.
 `include=` selects files, `exclude=` prunes directories.
-```toml
+```ini
 [type:go]
 include=*.go *.json Makefile Dockerfile
 exclude=vendor dist build
@@ -140,13 +139,9 @@ exclude=vendor dist build
 include=*.md
 ```
 
-```bash
-ktx .go
-```
-
 Pattern types support `with=` to compose other types.
 Include patterns and exclude dirs merge from all deps:
-```toml
+```ini
 [type:fullstack]
 with=js
 include=*.py *.toml Dockerfile
@@ -159,7 +154,7 @@ ktx .fullstack    # includes js type + fullstack
 
 ### Custom types — file lists
 List explicit file paths (one per line):
-```toml
+```ini
 [type:api]
 with=infra
 src/api/routes.ts
