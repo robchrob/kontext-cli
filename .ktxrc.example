@@ -1,46 +1,62 @@
 # .ktxrc — ktx configuration
 # vim:set et ft=toml sw=4 ts=4:
-# ktx searches upward from target dir for .ktxrc
+# ktx by default searches upward from target directory for .ktxrc
 # Override with: ktx -c path/to/.ktxrc.custom
 
-# ── Global settings ───────────────────────────
+# ── Global settings ───────────────────────────────
 # Default type when .type not specified on CLI
 type=api
 
-# Token budget (0 or omit = unlimited)
+# Token budget (skip / 0 = unlimited)
 limit=1000000
 
-# ── Output customization ─────────────────────
-# Set to empty string to disable
+# ── Output customization ──────────────────────────
+# Set strings to empty to disable them from printing
 instruction-header=Output full filename + extension in line before each code block.
-
-# Agents file (empty string disables agents ingest)
 agents-file=AGENTS.md
 
-# ── Modifiers (applied to the active type) ────
+# no-tree=true
+# no-agents=true
+
+# ── Modifiers (applied to the active type) ────────
 # +ITEM includes files matching glob/name
-# -ITEM removes from includes or adds dir to prune
+# -ITEM removes from includes (globs) or stops excluding a directory (names)
 +*.sql,Makefile
 -*.md
 
-# ── Custom types: pattern-based ───────────────
-# include= selects files by glob
-# exclude= prunes directories
-# with= composes types (merges include/exclude)
+# ── Custom types: pattern-based ───────────────────
+# Use include= and exclude= for glob-based file discovery
+# Use with= to compose types (merges include/exclude from dependencies)
 [type:docs]
 include=*.md *.rst *.txt *.adoc
 exclude=build _build site
 
-# ── Pattern type composition ──────────────────
-# with= merges include/exclude from dependencies
+[type:go]
+include=*.go *.mod *.sum *.json *.yml *.yaml *.md *.toml
+exclude=vendor dist build
+
+[type:rs]
+include=*.rs *.toml *.json *.yml *.yaml *.md
+exclude=target dist build
+
+[type:c]
+include=*.c *.h *.cpp *.hpp *.cc *.cxx *.cmake *.json *.yaml *.md
+exclude=build .cache out
+
+[type:java]
+include=*.java *.xml *.gradle *.properties *.yml *.yaml *.md
+exclude=.gradle build target out
+
+# ── Pattern type composition ──────────────────────
+# with= merges include/exclude from depended types
 [type:fullstack]
 with=js
 include=*.py *.toml Dockerfile
 exclude=__pycache__ .venv
 
-# ── Custom types: file lists ─────────────────
-# Explicit file paths (one per line).
-# with= composes types (always include shared files)
+# ── Custom types: file lists ─────────────────────
+# List explicit file paths (one per line) for domain slicing.
+# Use with= to compose types (e.g. always include shared/infra files).
 [type:api]
 with=infra
 src/api/routes.ts
