@@ -1,6 +1,37 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## [0.3.4]
+### Added
+- **`ktx init` subcommand**: Auto-generates `.ktxrc` by analyzing project
+  structure. Uses path-token clustering to discover feature domains —
+  language-agnostic, convention-free. Detects manifest files for language,
+  extracts tokens from directory names and file prefixes, clusters files
+  into `[type:domain]` sections with `with=infra`. Unmatched files go to
+  `[type:default]` with migration hints. Preview + confirm before writing.
+- **Multiple types**: `ktx .s1 .s2 [dir]` merges files from multiple types
+  with deduplication. Single shared token budget across all types.
+- **Bash completion script**: `contrib/ktx-completion.bash` with built-in
+  type flags, directory completion, and `.ktxrc`-aware custom type
+  suggestions.
+
+### Changed
+- **`.gitkeep` added to global excludes**: No longer appears in output.
+- **`run_find`/`run_files` accept optional 3rd arg**: When provided, writes
+  null-separated file paths to that file instead of emitting content.
+  Enables multi-type path collection without separate collector functions.
+- **`_output_result` helper**: Extracted clipboard/stats/dispatch logic
+  shared by single-type and multi-type paths.
+- **`_setup_type` shared**: Type validation + with= resolution used by
+  both single-type and multi-type paths.
+- **`_in_list` general helper**: Replaces `_is_stop`, `_is_stop2`,
+  `_is_infra_name` with a single function.
+- **`_split_camel`**: Uses bash 4+ `${c,,}` instead of `echo | tr`,
+  eliminating a subshell fork per character.
+- **`_cmd_init` decomposed**: `_init_scan` (walk + tokenize),
+  `_init_cluster` (group files), `_init_output` (generate .ktxrc).
+- **Usage text**: Added `ktx init [dir]` and multi-type syntax lines.
+
 ## [0.3.3]
 ### Changed
 - **Final release cleanup**: Trimmed changelog, removed LICENSE file, expanded
