@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-VERSION="0.3.4"
+VERSION="0.3.5"
 
 declare -A EXCLUDE_DIRS=(
   [default]='.git .svn .hg .idea .vscode .vs .cache .temp'
@@ -191,12 +191,17 @@ _merge_pattern_type() { local type=$1 m_inc="" m_exc="" t w inc exc
   done; INCLUDE_PATTERNS[$type]=$m_inc; EXCLUDE_DIRS[$type]=$m_exc; }
 
 # ── Git ──────────────────────────────────────────
+_git_worktree() { git -C "$1" rev-parse --is-inside-work-tree &>/dev/null; }
 get_git_ignored() { git -C "$1" ls-files -oi --exclude-standard --directory \
   2>/dev/null | sed 's~/$~~' || true; }
 _init_git_ignored() { local dir=$1 g; _GITIGNORED=()
-  git -C "$dir" rev-parse --is-inside-work-tree &>/dev/null || return 0
+  _git_worktree "$dir" || return 0
   while IFS= read -r g; do [[ -n $g ]] && _GITIGNORED[$g]=1; done < \
     <(get_git_ignored "$dir"); }
+_git_visible() { local dir=$1 rel=$2
+  _git_worktree "$dir" || return 0
+  git -C "$dir" ls-files --error-unmatch -- "$rel" &>/dev/null && return 0
+  ! git -C "$dir" check-ignore -q -- "$rel" 2>/dev/null; }
 
 # ── File processing ──────────────────────────────
 _should_skip() { local file=$1 base=$2 dir=$3 rel
@@ -254,18 +259,42 @@ _build_find_args() { local dir=$1 type=$2 excl d p pats first=1
     for p in $pats; do (( first )) || _FIND_ARGS+=(-o); first=0
       _FIND_ARGS+=(-name "$p"); done; _FIND_ARGS+=( \) ); fi
   set +f; _FIND_ARGS+=(-print0); }
+_matches_type() { local rel=$1 type=$2 base=${1##*/} excl pats d p seg parent
+  local -a _segs=()
+  excl=$(_get_exclude_dirs "$type"); pats=${INCLUDE_PATTERNS[$type]-*}
+  parent=${rel%/*}; [[ $parent == "$rel" ]] && parent=""; set -f
+  IFS='/' read -r -a _segs <<< "$parent"
+  for seg in "${_segs[@]}"; do for d in $excl; do
+    case "$seg" in $d) set +f; return 1 ;; esac; done; done
+  [[ -z $pats ]] && { set +f; return 1; }
+  [[ $pats == '*' ]] && { set +f; return 0; }
+  for p in $pats; do case "$base" in $p) set +f; return 0 ;; esac; done
+  set +f; return 1; }
+_git_candidates() { local dir=$1 type=$2 rel
+  while IFS= read -r -d '' rel; do
+    _matches_type "$rel" "$type" || continue
+    printf '%s\0' "$dir/$rel"
+  done < <(git -C "$dir" ls-files --cached --others --exclude-standard -z \
+    2>/dev/null); }
 run_find() { local dir=$1 type=$2 excl d tmp file
   local _paths_to=${3:-}
   _init_git_ignored "$dir"
   if (( TRACE_LEVEL >= 1 )); then excl=$(_get_exclude_dirs "$type")
     set -f; for d in $excl; do [[ -d "$dir/$d" ]] && \
       _trace_skip "dir-prune" "$dir/$d/"; done; set +f; fi
-  _build_find_args "$dir" "$type"
-  (( TRACE_LEVEL >= 2 )) && printf '  find: %s\n' "${_FIND_ARGS[*]}" >&2
   tmp=$(mktemp)
+  if _git_worktree "$dir"; then
+    (( TRACE_LEVEL >= 2 )) && printf '  git-visible: %s\n' "$dir" >&2
+    _git_candidates "$dir" "$type" > "$tmp"
+  else
+    _build_find_args "$dir" "$type"
+    (( TRACE_LEVEL >= 2 )) && \
+      printf '  find: %s\n' "${_FIND_ARGS[*]}" >&2
+    find "${_FIND_ARGS[@]}" 2>/dev/null > "$tmp" || true
+  fi
   if $RANDOM_ORDER && command -v shuf >/dev/null 2>&1; then
-    find "${_FIND_ARGS[@]}" 2>/dev/null | shuf -z > "$tmp" || true
-  else find "${_FIND_ARGS[@]}" 2>/dev/null | sort -z > "$tmp" || true; fi
+    shuf -z "$tmp" -o "$tmp" 2>/dev/null || true
+  else sort -z "$tmp" -o "$tmp"; fi
   if [[ -n $_paths_to ]]; then cat "$tmp" >> "$_paths_to"
     rm -f "$tmp"; return; fi
   _BUDGET_BYTES=0 _BUDGET_WORDS=0
@@ -350,7 +379,7 @@ _output_result() { local tmp=$1 label=$2 no_clip=$3
     "$(fmt_num "$total_toks")" "${dests[*]}" "$label" >&2; }
 usage() { cat >&2 <<EOF
 kontext-cli (ktx) v${VERSION}
-Usage: ktx [options] [modifiers...] [dir] [.type ...]
+Usage: ktx [options] [modifiers...] [dir ...] [.type ...]
        ktx init [dir]
 
 Options:
@@ -370,7 +399,7 @@ Options:
 Modifiers: +'*.sql,dist' include SQL + un-exclude dist/
            -'*.md,build' drop markdown + exclude build/
 Types: .default .js .py or custom via .ktxrc
-Multi:  ktx .s1 .s2 dir  (merge types, dedup files)
+Multi:  ktx dir1 dir2 .s1 .s2  (merge dirs/types, dedup files)
 Init:   ktx init [dir]   (generate .ktxrc from project)
 EOF
 }
@@ -523,7 +552,7 @@ _cmd_init() { local dir=${1:-.} exts f tok
 # ── Main ─────────────────────────────────────────
 main() { [[ ${1:-} == "init" ]] && { shift; _cmd_init "${1:-.}"; return; }
   local no_clip=false a p dir=. type=default rc="" is_filelist=false
-  local -a mods=() positional=() dests=() mtypes=()
+  local -a mods=() positional=() dests=() mtypes=() dirs=()
   while (( $# )); do case $1 in
     -h|--help) usage; exit 0 ;; -v|--version) echo "ktx $VERSION"; exit 0 ;;
     -o|--output) OUT_TO_FILE=true
@@ -543,56 +572,71 @@ main() { [[ ${1:-} == "init" ]] && { shift; _cmd_init "${1:-.}"; return; }
   for a in "$@"; do positional+=("$a"); done
   for a in "${positional[@]}"; do
     if [[ $a == .?* && ! -d $a ]]; then mtypes+=("${a#.}")
-    elif [[ -d $a && $dir == . ]]; then dir=$a
-    elif [[ -d $a ]]; then dir=$a; fi; done
-  dir=${dir%/}; [[ -d $dir ]] || \
+    elif [[ -d $a ]]; then dirs+=("${a%/}"); fi; done
+  (( ${#dirs[@]} )) || dirs=(.)
+  dir=${dirs[0]}; [[ -d $dir ]] || \
     { echo "Directory '$dir' not found" >&2; exit 1; }
   if [[ -n $CONFIG_FILE ]]; then rc=$CONFIG_FILE
   else rc=$(find_ktxrc "$dir") || true; fi
   [[ -n $rc ]] && load_ktxrc "$rc"
-  if (( ${#mtypes[@]} > 1 )); then
-    local t paths tmp tree_type="" fl
+  if (( ${#mtypes[@]} == 0 )) && (( ${#CUSTOM_TYPES[@]} )); then
+    for t in "${!CUSTOM_TYPES[@]}"; do mtypes+=("$t"); done
+  fi
+  if (( ${#dirs[@]} > 1 && ${#mtypes[@]} == 0 )); then
+    type=default; [[ -n $_TYPE_FROM_RC ]] && type=$_TYPE_FROM_RC
+    mtypes=("$type")
+  fi
+  if (( ${#mtypes[@]} > 1 || ${#dirs[@]} > 1 )); then
+    local t d paths tmp tree_type="" fl full label=""
     for t in "${mtypes[@]}"; do
       (( ${#RC_MODS[@]} )) && apply_mods "$t" "${RC_MODS[@]}"
       (( ${#mods[@]} )) && apply_mods "$t" "${mods[@]}"; done
-    for t in "${mtypes[@]}"; do
-      _trace_config "$t" "$(cd "$dir" >/dev/null 2>&1 && pwd)" "$rc"; done
+    for d in "${dirs[@]}"; do full=$(cd "$d" >/dev/null 2>&1 && pwd)
+      label+="${label:+ }$full"
+      for t in "${mtypes[@]}"; do _trace_config "$t" "$full" "$rc"; done
+    done
     paths=$(mktemp)
-    for t in "${mtypes[@]}"; do
-      fl=$(_setup_type "$t") || exit 1
-      if [[ $fl == true ]]; then run_files "$dir" "$t" "$paths"
-      else run_find "$dir" "$t" "$paths"; fi
+    for t in "${mtypes[@]}"; do fl=$(_setup_type "$t") || exit 1
+      for d in "${dirs[@]}"; do
+        if [[ $fl == true ]]; then run_files "$d" "$t" "$paths"
+        else run_find "$d" "$t" "$paths"; fi
+      done
       [[ -z $tree_type && $fl == false ]] && tree_type=$t; done
     [[ -z $tree_type ]] && tree_type=${mtypes[0]}
-    _init_git_ignored "$dir"
     local total_toks=0 ext file sorted
     sorted=$(mktemp); sort -zu "$paths" > "$sorted"; rm -f "$paths"
+    if $RANDOM_ORDER && command -v shuf >/dev/null 2>&1; then
+      shuf -z "$sorted" -o "$sorted" 2>/dev/null || true; fi
     if $DRY_RUN; then
-      $USE_TREE && run_tree "$dir" "$tree_type"
+      if $USE_TREE; then for d in "${dirs[@]}"; do
+        run_tree "$d" "$tree_type"; done; fi
       _BUDGET_BYTES=0 _BUDGET_WORDS=0
       while IFS= read -r -d '' file; do [[ -f $file ]] || continue
-        _should_skip "$file" "${file##*/}" "$dir" && continue
         _measure_and_emit "$file"; done < "$sorted"
       rm -f "$sorted"
       for ext in "${!EXT_TOK[@]}"; do \
         total_toks=$((total_toks+EXT_TOK[$ext])); done
       show_stats
-      printf '\nDry run: types: %s, files: %d, tokens: ~%s\n' \
-        "${mtypes[*]}" "$FILE_COUNT" "$(fmt_num "$total_toks")" >&2
+      printf '\nDry run: types: %s, dirs: %d, files: %d, tokens: ~%s\n' \
+        "${mtypes[*]}" "${#dirs[@]}" "$FILE_COUNT" \
+        "$(fmt_num "$total_toks")" >&2
       exit 0; fi
     tmp=$(mktemp)
     ! $RAW_MODE && [[ -n $INSTR_HEADER ]] && \
       printf '%s\n\n' "$INSTR_HEADER" > "$tmp"
-    ! $RAW_MODE && printf '## Context for %s\n\n' \
-      "$(cd "$dir" >/dev/null 2>&1 && pwd)" >> "$tmp"
-    $USE_TREE && run_tree "$dir" "$tree_type" >> "$tmp"
-    if $USE_AGENTS && [[ -n $AGENTS_FILE && -f "$dir/$AGENTS_FILE" ]]; then
-      ! $RAW_MODE && printf '### System Prompt (from %s)\n' \
-        "$AGENTS_FILE" >> "$tmp"
-      cat "$dir/$AGENTS_FILE" >> "$tmp"; printf '\n\n' >> "$tmp"; fi
+    ! $RAW_MODE && printf '## Context for %s\n\n' "$label" >> "$tmp"
+    if $USE_TREE; then for d in "${dirs[@]}"; do
+      run_tree "$d" "$tree_type" >> "$tmp"; done; fi
+    if $USE_AGENTS && [[ -n $AGENTS_FILE ]]; then
+      for d in "${dirs[@]}"; do
+        [[ -f "$d/$AGENTS_FILE" ]] || continue
+        _git_visible "$d" "$AGENTS_FILE" || continue
+        ! $RAW_MODE && printf '### System Prompt (from %s/%s)\n' \
+          "$d" "$AGENTS_FILE" >> "$tmp"
+        cat "$d/$AGENTS_FILE" >> "$tmp"; printf '\n\n' >> "$tmp"; done; fi
     _BUDGET_BYTES=0 _BUDGET_WORDS=0
     while IFS= read -r -d '' file; do [[ -f $file ]] || continue
-      _should_skip "$file" "${file##*/}" "$dir" && continue
+      is_globally_excluded "${file##*/}" && continue
       _measure_and_emit "$file" >> "$tmp" || break; done < "$sorted"
     rm -f "$sorted"
     _output_result "$tmp" "types: ${mtypes[*]}" "$no_clip"; return; fi
@@ -616,11 +660,13 @@ main() { [[ ${1:-} == "init" ]] && { shift; _cmd_init "${1:-.}"; return; }
   ! $RAW_MODE && [[ -n $INSTR_HEADER ]] && printf '%s\n\n' "$INSTR_HEADER" >> "$tmp"
   ! $RAW_MODE && printf '## Context for %s\n\n' "$full_path" >> "$tmp"
   $USE_TREE && [[ $is_filelist == false ]] && run_tree "$dir" "$type" >> "$tmp"
-  if $USE_AGENTS && [[ -n $AGENTS_FILE && -f "$dir/$AGENTS_FILE" ]]; then
+  if $USE_AGENTS && [[ -n $AGENTS_FILE && -f "$dir/$AGENTS_FILE" ]] && \
+     _git_visible "$dir" "$AGENTS_FILE"; then
     ! $RAW_MODE && printf '### System Prompt (from %s)\n' "$AGENTS_FILE" >> "$tmp"
     cat "$dir/$AGENTS_FILE" >> "$tmp"; printf '\n\n' >> "$tmp"; fi
   if [[ $is_filelist == true ]]; then run_files "$dir" "$type" >> "$tmp"
   else run_find "$dir" "$type" >> "$tmp"; fi
   _output_result "$tmp" "type: $type" "$no_clip"; }
-
 main "$@"
+
+

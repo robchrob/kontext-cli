@@ -1,3 +1,17 @@
+_ktx_visible_dirs() {
+  local cur=$1 d
+  COMPREPLY=()
+  [[ -z $cur ]] && COMPREPLY+=(".")
+  while IFS= read -r d; do
+    [[ ${d##*/} == .* ]] && continue
+    if git -C "$d" rev-parse --is-inside-work-tree &>/dev/null; then
+      [[ -n $(git -C "$d" ls-files --cached --others \
+        --exclude-standard 2>/dev/null | head -n1) ]] || continue
+    fi
+    COMPREPLY+=("$d")
+  done < <(compgen -d -- "$cur")
+}
+
 _ktx_completions() {
   local cur=${COMP_WORDS[COMP_CWORD]}
   local builtin_types="default js py"
@@ -11,7 +25,7 @@ _ktx_completions() {
   local dir="."
   for (( i=1; i<${#COMP_WORDS[@]}; i++ )); do
     [[ ${COMP_WORDS[i]} == [-+.]* ]] && continue
-    [[ -d ${COMP_WORDS[i]} ]] && dir=${COMP_WORDS[i]}
+    if [[ -d ${COMP_WORDS[i]} ]]; then dir=${COMP_WORDS[i]}; break; fi
   done
 
   local prev=""
@@ -33,14 +47,17 @@ _ktx_completions() {
     mapfile -t COMPREPLY < <(compgen -W "$long_flags" -- "$cur")
   elif [[ $cur == -* ]]; then
     mapfile -t COMPREPLY < <(compgen -W "$flags" -- "$cur")
-  elif [[ $cur == .* ]]; then
-    local all="$builtin_types$custom_types" opts="" w
+  elif [[ $cur == .* && $cur != */* ]]; then
+    local all="$builtin_types$custom_types" opts="." w
     for w in $all; do opts+=" .$w"; done
     mapfile -t COMPREPLY < <(compgen -W "$opts" -- "$cur")
-  elif [[ $cur == +* || $cur == -* ]]; then
+  elif [[ $cur == +* ]]; then
     COMPREPLY=()
   else
-    mapfile -t COMPREPLY < <(compgen -d -- "$cur")
+    _ktx_visible_dirs "$cur"
   fi
 }
+
 complete -F _ktx_completions ktx
+
+
